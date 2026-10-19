@@ -19,6 +19,7 @@ import { telegram } from "../../telegram/api.ts";
 import type { Button } from "../../telegram/types.ts";
 import type { Ctx } from "../context.ts";
 import { goalsTable } from "./goals.ts";
+import { COUNTRY_QUESTION, CountryNav, countryPicker } from "./country.ts";
 import { TZ_QUESTION, tzPicker } from "./timezone.ts";
 import { btn, link, LOG_HINT, REPLY_KEYBOARD, Reply, View } from "../ui.ts";
 
@@ -50,15 +51,20 @@ const QUESTIONS: Partial<Record<Step, string>> = {
   objective: "What's your goal?",
   pace: "How fast?",
   timezone: TZ_QUESTION,
+  country: COUNTRY_QUESTION,
 };
 
-/** Renders the current onboarding step. `value` is the stepper position for numeric steps, or the picker page for timezone. */
-export function stepView(ctx: Ctx, value?: number, prefix = ""): View {
+/**
+ * Renders the current onboarding step. `value` is the stepper position for numeric steps, or the picker page for
+ * timezone; `country` is the letter and page open in the country picker.
+ */
+export function stepView(ctx: Ctx, value?: number, prefix = "", country: CountryNav = null): View {
   const u = ctx.user;
   const step = u.onboardingStep;
   const header = `${prefix}<b>Setup</b>  ·  step ${PROFILE_STEPS.indexOf(step) + 1} of ${PROFILE_STEPS.length}\n\n${QUESTIONS[step] ?? ""}`;
   const prev = prevStep(step, u.objective);
-  const footer: Button[] = [...(prev ? [btn("‹ Back", "ob:back")] : []), btn("Skip setup", "ob:skip")];
+  // The country step has its own skip; skipping setup there would also skip computing goals.
+  const footer: Button[] = [...(prev ? [btn("‹ Back", "ob:back")] : []), ...(step === "country" ? [] : [btn("Skip setup", "ob:skip")])];
   const choose = (options: [string, string][]) => options.map(([label, v]) => btn(label, `ob:${step}:${v}`));
 
   if (isNumeric(step)) {
@@ -81,6 +87,7 @@ export function stepView(ctx: Ctx, value?: number, prefix = ""): View {
     objective: [choose([["Lose weight", "lose"], ["Maintain", "maintain"], ["Gain weight", "gain"]])],
     pace: [paceOptions(u.units, u.objective).map((p) => btn(p.label, `ob:pace:${p.kg}`))],
     timezone: tzPicker("o", value ?? null, u.utcOffsetMinutes),
+    country: [...countryPicker("o", country), [btn("Skip this question", "ct:o:c:none")]],
   };
   return { text: header, keyboard: [...(options[step] ?? []), footer] };
 }

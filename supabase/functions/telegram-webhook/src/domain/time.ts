@@ -26,12 +26,12 @@ export function dayStart(offsetMin: number, daysAgo = 0, now = Date.now()): Date
   return new Date(startLocal - offsetMin * 60_000);
 }
 
-/** Accepts an AI-provided timestamp only if it's within the last 30 days and not in the future. */
-export function parseEatenAt(s: string | null, now = Date.now()): Date | null {
+/** Accepts an AI-provided timestamp only if it's within the last `maxAgeDays` days and not in the future. */
+export function parseEatenAt(s: string | null | undefined, now = Date.now(), maxAgeDays = 7): Date | null {
   if (!s) return null;
   const d = new Date(s);
   const t = d.getTime();
-  if (isNaN(t) || t > now + 3_600_000 || t < now - 30 * DAY_MS) return null;
+  if (isNaN(t) || t > now + 3_600_000 || t < now - maxAgeDays * DAY_MS) return null;
   return d;
 }
 

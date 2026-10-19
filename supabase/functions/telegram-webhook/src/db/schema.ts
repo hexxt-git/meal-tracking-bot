@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { bigint, boolean, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import type { MealItem } from "../domain/meal.ts";
 import type { Step, Units } from "../domain/onboarding.ts";
+import type { PendingQuestion } from "../domain/question.ts";
 import type { Activity, Objective, Sex } from "../domain/nutrition.ts";
 
 const app = pgSchema("app");
@@ -25,11 +26,13 @@ export const users = app.table("users", {
   objective: text("objective").$type<Objective>(),
   paceKgPerWeek: decimal("pace_kg_per_week"),
   utcOffsetMinutes: integer("utc_offset_minutes").notNull().default(0),
+  country: text("country"),
   targetKcal: integer("target_kcal"),
   targetProteinG: integer("target_protein_g"),
   targetCarbsG: integer("target_carbs_g"),
   targetFatG: integer("target_fat_g"),
   fixMealId: uuid("fix_meal_id"),
+  pendingQuestion: jsonb("pending_question").$type<PendingQuestion>(),
   createdAt: tstz("created_at").notNull().defaultNow(),
   updatedAt: tstz("updated_at").notNull().defaultNow(),
 });
@@ -56,6 +59,7 @@ export const mealRevisions = app.table("meal_revisions", {
   id: uuid("id").primaryKey().defaultRandom(),
   tgId: tgId(),
   mealId: uuid("meal_id").notNull(),
+  batchId: uuid("batch_id").notNull().defaultRandom(),
   before: jsonb("before").$type<MealSnapshot>(),
   undoneAt: tstz("undone_at"),
   createdAt: tstz("created_at").notNull().defaultNow(),

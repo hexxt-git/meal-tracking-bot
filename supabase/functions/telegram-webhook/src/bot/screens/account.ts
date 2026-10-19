@@ -1,6 +1,7 @@
 // Menu, profile, settings and help panels.
 import { ACTIVITY, LB_PER_KG } from "../../domain/nutrition.ts";
 import { parseChoice } from "../../domain/onboarding.ts";
+import { countryName } from "../../domain/countries.ts";
 import { fmtOffset, localTime } from "../../domain/time.ts";
 import type { Ctx } from "../context.ts";
 import { keyPromptView } from "./onboarding.ts";
@@ -13,7 +14,8 @@ export const menuView = (): View => ({
     [btn("Today", "day:0"), btn("Week", "week")],
     [btn("History", "hist:0"), btn("Goals", "goals")],
     [btn("Profile", "prof"), btn("Settings", "set")],
-    [btn("Export CSV", "csv"), btn("Help", "help")],
+    [btn("Export CSV", "csv"), btn("Import CSV", "imp")],
+    [btn("Help", "help")],
   ],
 });
 
@@ -22,7 +24,11 @@ export const helpView = (): View => ({
 
 ${LOG_HINT} Several photos sent together count as one meal.
 
-To correct something, just say so, for example "that was 2 eggs, not 3" or "add a coke to lunch". Your last few meals are updated instead of adding a new one. You can also tap Fix under a logged meal.
+To correct something, just say so, for example "that was 2 eggs, not 3", "add a coke to lunch" or "I had it at 10". Meals logged in the last 24 hours can be changed this way; tapping Fix under a reply tells the assistant which meal you mean.
+
+Packaged and restaurant food is looked up online, preferring products sold in your country (set it in Settings). When an amount matters and can't be guessed, the assistant asks a quick multiple-choice question.
+
+You can also ask about your log, for example "how much protein do I have left today?"
 
 Use Today, History and Menu at the bottom of the chat to browse what you logged, adjust your goals and change settings.`,
   keyboard: [[btn("‹ Menu", "menu")]],
@@ -60,10 +66,12 @@ export async function settingsView(ctx: Ctx): Promise<View> {
     text: `<b>Settings</b>\n\n${table([
       ["Units", cap(u.units)],
       ["Timezone", `${fmtOffset(u.utcOffsetMinutes)}  (now ${localTime(new Date(), u.utcOffsetMinutes).slice(11)})`],
+      ["Country", countryName(u.country) ?? "Not set"],
       ["API key", hasKey ? "Saved" : "Not set"],
     ], ["l", "l"])}`,
     keyboard: [
-      [btn(`Switch to ${other}`, `units:${other}`), btn("Change timezone", "tz:s:p:-1")],
+      [btn(`Switch to ${other}`, `units:${other}`)],
+      [btn("Change timezone", "tz:s:p:-1"), btn("Change country", "ct:s")],
       [btn(hasKey ? "Replace API key" : "Add API key", "key:new"), ...(hasKey ? [btn("Remove API key", "key:rm")] : [])],
       [btn("Delete account", "acct")],
       [btn("‹ Menu", "menu")],

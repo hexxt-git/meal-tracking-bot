@@ -1,7 +1,9 @@
 // Day, week, history and single-meal panels.
+import { parseMealsCsv, toCsv } from "../../domain/csv.ts";
 import { sumTotals } from "../../domain/meal.ts";
 import { dayStart, groupByLocalDay, localDayLabel, localTime } from "../../domain/time.ts";
 import { esc, telegram } from "../../telegram/api.ts";
+import type { FileRef } from "../../telegram/types.ts";
 import type { Ctx } from "../context.ts";
 import { clock, dayLabel, mealBody, mealButtonLabel, progressTable } from "../format.ts";
 import { bar, btn, LOG_HINT, num, Reply, table, View } from "../ui.ts";
@@ -83,34 +85,66 @@ export async function mealView(ctx: Ctx, mealId: string, origin: Origin): Promis
 }
 
 export async function deleteMeal(ctx: Ctx, mealId: string, origin: Origin): Promise<Reply> {
-  const meal = await ctx.db.meals.byId(mealId);
-  const revisionId = meal && await ctx.db.meals.delete(mealId);
-  if (!meal || !revisionId) return { toast: "Already deleted", view: await mealView(ctx, mealId, origin) };
+  const result = await ctx.db.meals.delete(mealId);
+  if (!result) return { toast: "Already deleted", view: await mealView(ctx, mealId, origin) };
   return {
-    view: { text: `Deleted <b>${esc(meal.description)}</b>.`, keyboard: [[btn("Undo", `undo:${revisionId}:${origin}`), backButton(origin)]] },
+    view: {
+      text: `Deleted <b>${esc(result.meal.description)}</b>.`,
+      keyboard: [[btn("Undo", `undo:${result.batchId}:${origin}`), backButton(origin)]],
+    },
   };
 }
 
-/** Undo from a panel returns to the meal; undo from a log reply rewrites that reply. */
-export async function undo(ctx: Ctx, revisionId: string, origin: Origin | undefined): Promise<Reply> {
-  const result = await ctx.db.meals.undo(revisionId);
-  if (!result) return { toast: "Already undone" };
-  if (origin) return { view: await mealView(ctx, result.mealId, origin) };
-  const text = result.restored ? `Reverted <b>${esc(result.description)}</b> to its previous version.` : `Removed <b>${esc(result.description)}</b>.`;
-  return { view: { text, keyboard: [[btn("Today", "day:0")]] } };
+/** Undo from a panel returns to the meal; undo from an assistant reply rewrites that reply. */
+export async function undo(ctx: Ctx, batchId: string, origin: Origin | undefined): Promise<Reply> {
+  const results = await ctx.db.meals.undo(batchId);
+  if (!results.length) return { toast: "Already undone" };
+  if (origin) return { view: await mealView(ctx, results[0].mealId, origin) };
+  // Results run newest first, so the last entry per meal is the state it was reverted to.
+  const outcome = new Map(results.map((r) => [r.mealId, r]));
+  const lines = outcome.size > 10
+    ? [`Reverted ${num(outcome.size)} meals.`]
+    : [...outcome.values()].map((r) =>
+      r.restored ? `Restored <b>${esc(r.description)}</b> to its previous version.` : `Removed <b>${esc(r.description)}</b>.`
+    );
+  return { view: { text: lines.join("\n"), keyboard: [[btn("Today", "day:0")]] } };
 }
 
 export async function exportCsv(ctx: Ctx): Promise<Reply> {
   const meals = await ctx.db.meals.all();
   if (!meals.length) return { toast: "No meals logged yet" };
-  const cell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const header = "eaten_at_utc,eaten_local_date,eaten_local_time,logged_at_utc,description,kcal,protein_g,carbs_g,fat_g,items,note";
-  const csv = meals.map((m) =>
-    [
-      m.eatenAt.toISOString(), dayLabel(m.eatenAt, ctx.user), clock(m.eatenAt, ctx.user), m.loggedAt.toISOString(), m.description,
-      m.kcal, m.proteinG, m.carbsG, m.fatG, JSON.stringify(m.items), m.userNote,
-    ].map(cell).join(",")
-  );
-  await telegram.sendDocument(ctx.user.chatId, "meals.csv", [header, ...csv].join("\n"), "text/csv");
+  const csv = toCsv(meals.map((m) => [
+    m.eatenAt.toISOString(), dayLabel(m.eatenAt, ctx.user), clock(m.eatenAt, ctx.user), m.loggedAt.toISOString(), m.description,
+    m.kcal, m.proteinG, m.carbsG, m.fatG, JSON.stringify(m.items), m.userNote,
+  ]));
+  await telegram.sendDocument(ctx.user.chatId, "meals.csv", csv, "text/csv");
   return {};
+}
+
+const MAX_IMPORT_BYTES = 2_000_000;
+
+export const importHelpView = (): View => ({
+  text: `<b>Import CSV</b>
+
+Send a CSV file in the same format as Export CSV, as a file attachment. Meals already in your log (same time and title) are skipped, and the whole import can be undone.`,
+  keyboard: [[btn("‹ Menu", "menu")]],
+});
+
+export const isCsvFile = (doc: FileRef) =>
+  doc.mime_type === "text/csv" || doc.mime_type === "text/comma-separated-values" || /\.csv$/i.test(doc.file_name ?? "");
+
+export async function importCsv(ctx: Ctx, doc: FileRef) {
+  if ((doc.file_size ?? 0) > MAX_IMPORT_BYTES) return ctx.send("That file is too large to import (2 MB max).");
+  const parsed = parseMealsCsv(new TextDecoder().decode(await telegram.download(doc.file_id)));
+  if (!parsed.ok) return ctx.send(`Couldn't import that file. ${esc(parsed.error)} Use a file made with Export CSV.`);
+  if (!parsed.meals.length) return ctx.send("No valid meals found in that file.");
+  const { imported, duplicates, batchId } = await ctx.db.meals.importMany(parsed.meals);
+  const notes = [
+    ...(duplicates ? [`${num(duplicates)} already in your log, skipped.`] : []),
+    ...(parsed.invalidRows ? [`${num(parsed.invalidRows)} rows couldn't be read, skipped.`] : []),
+  ];
+  return ctx.send({
+    text: `Imported <b>${num(imported)}</b> ${imported === 1 ? "meal" : "meals"}.${notes.length ? `\n${notes.join("\n")}` : ""}`,
+    keyboard: [[...(imported ? [btn("Undo", `undo:${batchId}`)] : []), btn("History", "hist:0")]],
+  });
 }

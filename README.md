@@ -3,28 +3,37 @@
 A Telegram bot ([@mmeal_tracking_bot](https://t.me/mmeal_tracking_bot)) that logs meals from photos, text and voice notes,
 estimates calories and macros, and tracks them against personal daily goals.
 
-It runs entirely on Supabase, with one Edge Function plus Postgres and no other server. Meal analysis uses
-`google/gemini-3.8-flash` (reasoning effort: medium) through OpenRouter, and each user pays for their own usage with
-their own API key.
+It runs entirely on Supabase, with one Edge Function plus Postgres and no other server. Messages are handled by a
+tool-calling agent ([pi](https://github.com/earendil-works/pi) agent loop) on `google/gemini-3.8-flash` (reasoning effort:
+medium) through OpenRouter. It can search the web with Gemini's own Google Search, and each user pays for their own
+usage with their own API key.
 
 ## Using the bot
 
 1. **Start**: paste an OpenRouter API key into the chat. The key is checked, stored encrypted and the message is deleted.
 2. **Setup** (optional, about a minute, all buttons): units, sex, age, height, weight, activity, goal and pace, then
-   timezone (picked by current clock time). Daily goals are computed with Mifflin-St Jeor. Protein is 1.8 g/kg (2.0 when
-   cutting), fat is 25% of calories and carbs are the rest.
-3. **Log**: send a photo (or an album), a description or a voice note. The reply shows the items, the totals and today's
-   progress, with **Undo**, **Fix** and **Today** buttons. Corrections like "that was 2 eggs, not 3" update one of the
-   last three meals instead of adding a new one. Times work the same way: "had eggs at 8am" logs the meal at 08:00,
-   and "I had it this morning at 10AM" moves the last meal to 10:00. The model gets the current local time (the moment
-   the message was sent) and resolves relative times against it. Each meal keeps both its eaten and logged time.
+   timezone (picked by current clock time) and country (picked by first letter). Daily goals are computed with
+   Mifflin-St Jeor. Protein is 1.8 g/kg (2.0 when cutting), fat is 25% of calories and carbs are the rest.
+3. **Log**: send a photo (or an album), a description or a voice note. The assistant decides what the message is: new
+   meals, a correction to a logged meal ("that was 2 eggs, not 3", "I had it this morning at 10AM"), or a question
+   ("how much protein is left today?"). The reply shows every meal it logged, updated or deleted, the totals and today's
+   progress, with **Undo** (reverts everything that reply changed), **Fix** and **Today** buttons. **Fix** only tells
+   the assistant which meal your next message is about.
+   - **Research**: before logging branded, packaged or restaurant food the assistant must look up its nutrition data
+     online (a readable label in the photo counts), preferring products sold in your country.
+   - **Questions**: when an unknown would swing the estimate a lot (how much of a shared bag you ate, say), it asks
+     one multiple-choice question as buttons. Tap an answer or type one. At most two rounds per message.
+   - **Times**: the assistant gets the moment the message was sent, in your timezone, and resolves "this morning at
+     10" or "yesterday's dinner" against it. Each meal keeps both its eaten and logged time.
 4. **Browse**: the bottom keyboard opens **Today**, **History** and **Menu**:
    - **Day view**: progress bars and a tappable meal list; step back through previous days.
    - **Week**: a 7-day chart.
    - **History**: older meals, page by page.
    - **Meal**: item table, with Delete and Undo.
    - **Goals**: steppers per value, or recalculate from your profile.
-   - **Profile**, **Settings** (units, timezone, API key, delete account) and CSV export.
+   - **Profile**, **Settings** (units, timezone, country, API key, delete account).
+   - **Export CSV** / **Import CSV**: send back a file in the export format to import it. Meals already in the log are
+     skipped and the import can be undone.
 
 The bot works in private chats only and leaves any group it's added to.
 
@@ -35,6 +44,7 @@ Telegram ──webhook──▶ Edge Function `telegram-webhook` ──direct Po
                          │  verifies secret header, acks at once,             │
                          │  handles the update in the background              ├─ Vault (OpenRouter keys)
                          └──────────────▶ OpenRouter (user's key)             └─ pg_cron: cleanup, keepalive
+                                          Gemini + server-side web search
 ```
 
 ```
@@ -45,26 +55,44 @@ supabase/
     index.ts                       HTTP entry: /health, webhook auth, background dispatch
     src/
       config.ts                    env vars and tunables (model, limits)
-      domain/                      pure logic: nutrition math, setup steps and steppers, goals, time/day math
+      domain/                      pure logic: nutrition math, setup steps and steppers, goals, time/day math,
+                                   countries, CSV format, pending questions
+      agent/                       the assistant: system prompt, meal tools, agent run (pi agent loop)
       db/                          all database access (Drizzle)
         client.ts                  connection; `userRunner` scopes each transaction to one Telegram user
         schema.ts                  typed mirror of the migrations
         repos/                     users, meals (+ undo revisions), keys (Vault), limits, albums
-      services/                    OpenRouter client, prompt and response schema
+      services/                    OpenRouter: model, streaming with web search and audio, key checks
       telegram/                    Bot API adapter and types
       bot/
         router.ts                  update → command / button / key / meal
         commands.ts, callbacks.ts  slash commands and button handlers (callback data `kind:arg:…`)
-        meals.ts                   meal logging flow (albums, media download, AI decision, create/edit)
+        assistant.ts               message → agent run (albums, media download, questions, reply rendering)
         ui.ts, format.ts           view type, buttons, aligned tables, progress bars
-        screens/                   panels: journal, onboarding, goals, account/settings, timezone picker
-    tests/                         Deno tests for the domain logic
+        screens/                   panels: journal (+ CSV), onboarding, goals, account/settings, timezone and country pickers
+    tests/                         Deno tests for the domain logic and the agent's change tracking
 scripts/setup-bot.ts               sets bot name, descriptions, commands, avatar and webhook
 assets/                            bot avatar (SVG source + JPG upload)
 ```
 
 Panels are edited in place: every button press re-renders the message it belongs to instead of sending a new one.
-All SQL lives in `src/db/`; handlers only call typed repository methods.
+All SQL lives in `src/db/`; handlers and agent tools only call typed repository methods.
+
+## The assistant
+
+Each message starts one agent run (`src/agent/`). The model gets the current local time, the user's country, units and
+targets, and the meals logged in the last 24 hours. It works through these tools in as many turns as it needs (up to
+8, two minutes at most):
+
+| Tool | Does |
+|---|---|
+| `log_meal` | records a new meal with its item breakdown and optional eaten time |
+| `update_meal` / `delete_meal` | changes a meal logged in the last 24 h (older meals are read-only) |
+| `read_meals` | reads meals eaten in the last 7 days |
+| `ask_user` | asks a multiple-choice question and ends the run; the answer re-runs it with the Q&A in context |
+| web search | OpenRouter's `openrouter:web_search` server tool with `engine: "native"`, i.e. Google Search run by Gemini |
+
+Every write in a run shares one undo batch. The function logs each tool call and the run's billed cost.
 
 ## Security model
 
@@ -85,9 +113,9 @@ All SQL lives in `src/db/`; handlers only call typed repository methods.
 
 | Table | Purpose |
 |---|---|
-| `users` | Telegram id, chat id, setup step, profile, timezone offset, daily goals, pending Fix target |
+| `users` | Telegram id, chat id, setup step, profile, timezone offset, country, daily goals, Fix target, open question |
 | `meals` | `eaten_at` (when it was eaten, settable by the AI), `logged_at` (when the message was sent), title, AI item breakdown (JSON), totals, Telegram photo file ids, the user's text |
-| `meal_revisions` | snapshot before each create/edit/delete, for Undo (kept 30 days) |
+| `meal_revisions` | snapshot before each create/edit/delete, grouped by `batch_id`, for Undo (kept 30 days) |
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
 | `rate_limits` | per-user fixed-window counters (kept 2 days) |
 | `media_group_items` | album photos waiting to be processed together (kept 1 day) |
@@ -138,4 +166,9 @@ bun run deploy   # redeploy the function
 - **Cleanup**: the `app-cleanup` cron job runs nightly at 03:17 UTC and trims the bookkeeping tables listed above.
 - **Free tier**: 500 MB database and 500k function invocations a month. One user logging 10 meals a day uses about
   300 invocations a month.
-- **AI cost**: paid by each user on OpenRouter, about $0.01 per photo with Gemini 3.8 Flash (≈ $2–4/month at 10 a day).
+- **AI cost**: paid by each user on OpenRouter. Model tokens are about $0.01–0.02 per photo with Gemini 3.8 Flash.
+  Native web search is billed on top. In testing, two photo messages cost about $0.37 in total, mostly outside model
+  tokens, which points to search fees; the function logs each run's billed cost, so check it there. Set `config.agent.searchEngine` to `"exa"` (about $0.007 per search) for a cheaper engine, and lower
+  `maxSearchesPerRequest` to cap it.
+- **Logs**: `GET /v1/projects/<ref>/analytics/endpoints/logs` with
+  `sql=select timestamp, event_message from logs where source = 'function_logs' order by timestamp desc limit 50`.

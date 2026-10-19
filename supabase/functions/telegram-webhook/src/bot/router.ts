@@ -6,7 +6,8 @@ import type { Message, Update } from "../telegram/types.ts";
 import { runCallback } from "./callbacks.ts";
 import { runCommand, runReplyKey } from "./commands.ts";
 import { createCtx, Ctx } from "./context.ts";
-import { logMeal } from "./meals.ts";
+import { respond } from "./assistant.ts";
+import { importCsv, isCsvFile } from "./screens/journal.ts";
 import { saveKey, stepView, welcomeView } from "./screens/onboarding.ts";
 
 export async function handleUpdate(update: Update) {
@@ -48,9 +49,10 @@ function routeMessage(ctx: Ctx, msg: Message) {
   if (text?.startsWith("/")) return runCommand(ctx, msg);
   if (text && looksLikeKey(text)) return saveKey(ctx, text, msg.message_id);
   if (ctx.user.onboardingStep === "key") return ctx.send(welcomeView());
+  if (msg.document && isCsvFile(msg.document)) return importCsv(ctx, msg.document);
   const nav = text ? runReplyKey(ctx, text) : null;
   if (nav) return nav;
-  // During setup, typed text would be ambiguous, so re-show the current step instead of logging it as a meal.
+  // During setup, typed text would be ambiguous, so re-show the current step instead of passing it to the assistant.
   if (text && ctx.user.onboardingStep !== "done") return ctx.send(stepView(ctx));
-  return logMeal(ctx, msg);
+  return respond(ctx, msg);
 }

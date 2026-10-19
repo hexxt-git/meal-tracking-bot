@@ -13,20 +13,18 @@ const fromSnapshot = (s: MealSnapshot): Meal => ({
   updatedAt: new Date(s.updatedAt),
 });
 
-async function recordRevision(tx: Tx, mealId: string, before: Meal | null) {
-  const [rev] = await tx
-    .insert(mealRevisions)
-    .values({ mealId, before: before && toSnapshot(before) })
-    .returning({ id: mealRevisions.id });
-  return rev.id;
+async function recordRevision(tx: Tx, batchId: string, mealId: string, before: Meal | null) {
+  await tx.insert(mealRevisions).values({ batchId, mealId, before: before && toSnapshot(before) });
 }
+
+export type UndoResult = { mealId: string; description: string; restored: boolean };
 
 export function mealsRepo(run: Run) {
   return {
     byId: (id: string) => run(async (tx) => (await tx.select().from(meals).where(eq(meals.id, id)))[0] ?? null),
 
-    /** Most recently logged first (not eaten), so "it" means the meal the user just sent. */
-    recentlyLogged: (limit: number) => run((tx) => tx.select().from(meals).orderBy(desc(meals.loggedAt)).limit(limit)),
+    /** Meals sent to the bot at or after `from`, most recent first. */
+    loggedSince: (from: Date) => run((tx) => tx.select().from(meals).where(gte(meals.loggedAt, from)).orderBy(desc(meals.loggedAt))),
 
     since: (from: Date) => run((tx) => tx.select().from(meals).where(gte(meals.eatenAt, from)).orderBy(asc(meals.eatenAt))),
 
@@ -44,49 +42,73 @@ export function mealsRepo(run: Run) {
 
     all: () => run((tx) => tx.select().from(meals).orderBy(asc(meals.eatenAt))),
 
-    /** Inserts the meal and an undo record for it. */
-    create: (meal: NewMeal) =>
+    // Writes record an undo revision under `batchId`; undoing the batch reverts every change in it.
+
+    create: (meal: NewMeal, batchId: string = crypto.randomUUID()) =>
       run(async (tx) => {
         const [row] = await tx.insert(meals).values(meal).returning();
-        return { meal: row, revisionId: await recordRevision(tx, row.id, null) };
+        await recordRevision(tx, batchId, row.id, null);
+        return { meal: row, batchId };
       }),
 
-    /** Updates the meal, keeping its prior state for undo. */
-    update: (id: string, patch: Partial<NewMeal>) =>
+    update: (id: string, patch: Partial<NewMeal>, batchId: string = crypto.randomUUID()) =>
       run(async (tx) => {
         const [before] = await tx.select().from(meals).where(eq(meals.id, id)).for("update");
         if (!before) return null;
-        const revisionId = await recordRevision(tx, id, before);
+        await recordRevision(tx, batchId, id, before);
         const [meal] = await tx.update(meals).set(patch).where(eq(meals.id, id)).returning();
-        return { meal, before, revisionId };
+        return { meal, before, batchId };
       }),
 
-    /** Deletes the meal, keeping it for undo. Returns the revision id, or null if it was already gone. */
-    delete: (id: string) =>
+    /** Null if the meal was already gone. */
+    delete: (id: string, batchId: string = crypto.randomUUID()) =>
       run(async (tx) => {
         const [before] = await tx.delete(meals).where(eq(meals.id, id)).returning();
-        return before ? await recordRevision(tx, id, before) : null;
+        if (!before) return null;
+        await recordRevision(tx, batchId, id, before);
+        return { meal: before, batchId };
       }),
 
-    /** Reverts one create/update/delete. Null if it was already undone. */
-    undo: (revisionId: string) =>
+    /**
+     * Inserts meals in one transaction, skipping any whose eaten time and title match an existing meal,
+     * so importing the same file twice adds nothing.
+     */
+    importMany: (rows: NewMeal[], batchId: string = crypto.randomUUID()) =>
       run(async (tx) => {
-        const [rev] = await tx
+        const key = (m: { eatenAt?: Date; description: string }) => `${m.eatenAt?.getTime()}|${m.description}`;
+        const seen = new Set((await tx.select({ eatenAt: meals.eatenAt, description: meals.description }).from(meals)).map(key));
+        const fresh = rows.filter((r) => !seen.has(key(r)) && seen.add(key(r)));
+        for (let i = 0; i < fresh.length; i += 500) {
+          const inserted = await tx.insert(meals).values(fresh.slice(i, i + 500)).returning({ id: meals.id });
+          await tx.insert(mealRevisions).values(inserted.map((m) => ({ batchId, mealId: m.id, before: null })));
+        }
+        return { imported: fresh.length, duplicates: rows.length - fresh.length, batchId };
+      }),
+
+    /** Reverts every change in the batch, newest first. Empty if it was already undone. */
+    undo: (batchId: string) =>
+      run(async (tx) => {
+        const revs = await tx
           .update(mealRevisions)
           .set({ undoneAt: new Date() })
-          .where(and(eq(mealRevisions.id, revisionId), isNull(mealRevisions.undoneAt)))
+          .where(and(eq(mealRevisions.batchId, batchId), isNull(mealRevisions.undoneAt)))
           .returning();
-        if (!rev) return null;
-        if (!rev.before) {
-          const [gone] = await tx.delete(meals).where(eq(meals.id, rev.mealId)).returning({ description: meals.description });
-          return { mealId: rev.mealId, description: gone?.description ?? "meal", restored: false };
+        revs.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const results: UndoResult[] = [];
+        for (const rev of revs) {
+          if (!rev.before) {
+            const [gone] = await tx.delete(meals).where(eq(meals.id, rev.mealId)).returning({ description: meals.description });
+            results.push({ mealId: rev.mealId, description: gone?.description ?? "meal", restored: false });
+            continue;
+          }
+          const { id: _id, tgId: _tg, createdAt: _c, updatedAt: _u, ...restorable } = fromSnapshot(rev.before);
+          await tx
+            .insert(meals)
+            .values({ id: rev.mealId, ...restorable })
+            .onConflictDoUpdate({ target: meals.id, set: restorable });
+          results.push({ mealId: rev.mealId, description: restorable.description, restored: true });
         }
-        const { id: _id, tgId: _tg, createdAt: _c, updatedAt: _u, ...restorable } = fromSnapshot(rev.before);
-        await tx
-          .insert(meals)
-          .values({ id: rev.mealId, ...restorable })
-          .onConflictDoUpdate({ target: meals.id, set: restorable });
-        return { mealId: rev.mealId, description: restorable.description, restored: true };
+        return results;
       }),
   };
 }

@@ -2,7 +2,7 @@
 
 export type Chat = { id: number; type: "private" | "group" | "supergroup" | "channel" };
 export type From = { id: number; first_name?: string };
-export type FileRef = { file_id: string; mime_type?: string };
+export type FileRef = { file_id: string; mime_type?: string; file_name?: string; file_size?: number };
 
 export type Message = {
   message_id: number;

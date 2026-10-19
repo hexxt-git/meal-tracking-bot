@@ -4,8 +4,11 @@ import type { Button, Keyboard } from "../telegram/types.ts";
 /** One screen: HTML text plus its inline keyboard. Panels are re-rendered in place by editing the message. */
 export type View = { text: string; keyboard: Keyboard };
 
-/** What a button press produces: a view to edit into the pressed message, a new message, and/or a toast. */
-export type Reply = { view?: View; send?: View; toast?: string };
+/**
+ * What a button press produces: a view to edit into the pressed message, a new message, a toast,
+ * and/or slow follow-up work that runs after the press is acknowledged.
+ */
+export type Reply = { view?: View; send?: View; toast?: string; after?: () => Promise<unknown> };
 
 export const btn = (text: string, data: string): Button => ({ text, callback_data: data });
 export const link = (text: string, url: string): Button => ({ text, url });

@@ -1,3 +1,4 @@
+import { isCountry } from "./countries.ts";
 import { Activity, ACTIVITY, LB_PER_KG, Objective, Profile, Sex } from "./nutrition.ts";
 import { TZ_OFFSETS } from "./time.ts";
 
@@ -14,6 +15,7 @@ export type Step =
   | "objective"
   | "pace"
   | "timezone"
+  | "country"
   | "done";
 
 export const PROFILE_START: Step = "units";
@@ -29,9 +31,9 @@ export type ProfileState = {
   paceKgPerWeek: number | null;
 };
 
-export type ProfilePatch = Partial<ProfileState & { utcOffsetMinutes: number }>;
+export type ProfilePatch = Partial<ProfileState & { utcOffsetMinutes: number; country: string | null }>;
 
-export const PROFILE_STEPS: Step[] = ["units", "sex", "age", "height", "weight", "activity", "objective", "pace", "timezone"];
+export const PROFILE_STEPS: Step[] = ["units", "sex", "age", "height", "weight", "activity", "objective", "pace", "timezone", "country"];
 
 export function nextStep(step: Step, objective: Objective | null): Step {
   if (step === "objective" && objective === "maintain") return "timezone";
@@ -74,6 +76,9 @@ export function parseChoice(step: Step, value: string, state: ProfileState): Pro
       const off = Number(value);
       return TZ_OFFSETS.includes(off) ? { utcOffsetMinutes: off } : null;
     }
+    case "country":
+      if (value === "none") return { country: null };
+      return isCountry(value) ? { country: value } : null;
     default:
       return null;
   }

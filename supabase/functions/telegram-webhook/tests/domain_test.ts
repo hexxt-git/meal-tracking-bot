@@ -25,7 +25,8 @@ const state: ProfileState = {
 Deno.test("onboarding skips pace when maintaining, both ways", () => {
   assertEquals(nextStep("objective", "maintain"), "timezone");
   assertEquals(nextStep("objective", "lose"), "pace");
-  assertEquals(nextStep("timezone", null), "done");
+  assertEquals(nextStep("timezone", null), "country");
+  assertEquals(nextStep("country", null), "done");
   assertEquals(prevStep("timezone", "maintain"), "objective");
   assertEquals(prevStep("timezone", "lose"), "pace");
   assertEquals(prevStep("units", null), null);

@@ -7,6 +7,15 @@ export type MealItem = {
   fat_g: number;
 };
 
+const HOUR_MS = 3_600_000;
+
+/** How long after logging a meal the assistant may still change it. Older meals are read-only history. */
+export const EDIT_WINDOW_HOURS = 24;
+/** How far back the assistant may read meals (by eaten time), and the oldest eaten time it may set. */
+export const READ_WINDOW_DAYS = 7;
+
+export const isEditable = (loggedAt: Date, now: number) => now - loggedAt.getTime() <= EDIT_WINDOW_HOURS * HOUR_MS;
+
 export type Totals = { kcal: number; proteinG: number; carbsG: number; fatG: number };
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
