@@ -38,6 +38,7 @@ export const meals = app.table("meals", {
   id: uuid("id").primaryKey().defaultRandom(),
   tgId: tgId(),
   eatenAt: tstz("eaten_at").notNull().defaultNow(),
+  loggedAt: tstz("logged_at").notNull().defaultNow(),
   description: text("description").notNull(),
   userNote: text("user_note"),
   items: jsonb("items").$type<MealItem[]>().notNull().default([]),
@@ -81,4 +82,9 @@ export type UserPatch = Partial<Omit<typeof users.$inferInsert, "tgId" | "create
 export type Meal = typeof meals.$inferSelect;
 export type NewMeal = Omit<typeof meals.$inferInsert, "id" | "tgId" | "createdAt" | "updatedAt">;
 /** A meal row serialized to JSON (dates become ISO strings). */
-export type MealSnapshot = Omit<Meal, "eatenAt" | "createdAt" | "updatedAt"> & { eatenAt: string; createdAt: string; updatedAt: string };
+export type MealSnapshot = Omit<Meal, "eatenAt" | "loggedAt" | "createdAt" | "updatedAt"> & {
+  eatenAt: string;
+  loggedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};

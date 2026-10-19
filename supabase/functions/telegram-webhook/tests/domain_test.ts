@@ -2,7 +2,21 @@ import { assertEquals } from "@std/assert";
 import { itemTotals } from "../src/domain/meal.ts";
 import { clampStep, nextStep, parseChoice, prevStep, ProfileState, stepAfterKey, stepper } from "../src/domain/onboarding.ts";
 import { clampGoal } from "../src/domain/goals.ts";
-import { dayStart, groupByLocalDay, isoOffset, localDayLabel, localTime, parseEatenAt, TZ_OFFSETS, TZ_PAGES, tzPage, tzPageOf } from "../src/domain/time.ts";
+import {
+  dayStart,
+  groupByLocalDay,
+  isoOffset,
+  localDayLabel,
+  localIso,
+  localStamp,
+  localTime,
+  mealTimeLabel,
+  parseEatenAt,
+  TZ_OFFSETS,
+  TZ_PAGES,
+  tzPage,
+  tzPageOf,
+} from "../src/domain/time.ts";
 
 const state: ProfileState = {
   units: "metric", sex: null, age: null, heightCm: null, weightKg: null, activity: null, objective: null, paceKgPerWeek: null,
@@ -89,4 +103,25 @@ Deno.test("grouping and totals", () => {
     ]),
     { kcal: 150, proteinG: 2.6, carbsG: 2, fatG: 3 },
   );
+});
+
+Deno.test("time context given to the model", () => {
+  const d = new Date("2026-10-19T12:42:30Z");
+  assertEquals(localIso(d, 60), "2026-10-19T13:42:30+01:00");
+  assertEquals(localIso(d, -570), "2026-10-19T03:12:30-09:30");
+  assertEquals(localStamp(d, 60), "Mon 2026-10-19 13:42");
+  assertEquals(localStamp(d, 720), "Tue 2026-10-20 00:42");
+});
+
+Deno.test("meal time label shows logged time only when it differs", () => {
+  const logged = new Date("2026-10-19T12:42:00Z");
+  assertEquals(mealTimeLabel(new Date("2026-10-19T12:40:00Z"), logged, 60), "13:40");
+  assertEquals(mealTimeLabel(new Date("2026-10-19T09:00:00Z"), logged, 60), "10:00, logged 13:42");
+  assertEquals(mealTimeLabel(new Date("2026-10-18T19:00:00Z"), logged, 60), "Sun 18 Oct 20:00, logged Mon 19 Oct 13:42");
+});
+
+Deno.test("eaten_at in the user's offset resolves to the right instant", () => {
+  const sent = Date.parse("2026-10-19T12:42:00Z");
+  assertEquals(parseEatenAt("2026-10-19T10:00:00+01:00", sent)?.toISOString(), "2026-10-19T09:00:00.000Z");
+  assertEquals(parseEatenAt("2026-10-19T15:00:00+01:00", sent), null);
 });

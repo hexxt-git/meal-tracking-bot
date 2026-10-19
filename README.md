@@ -15,7 +15,9 @@ their own API key.
    cutting), fat is 25% of calories and carbs are the rest.
 3. **Log**: send a photo (or an album), a description or a voice note. The reply shows the items, the totals and today's
    progress, with **Undo**, **Fix** and **Today** buttons. Corrections like "that was 2 eggs, not 3" update one of the
-   last three meals instead of adding a new one.
+   last three meals instead of adding a new one. Times work the same way: "had eggs at 8am" logs the meal at 08:00,
+   and "I had it this morning at 10AM" moves the last meal to 10:00. The model gets the current local time (the moment
+   the message was sent) and resolves relative times against it. Each meal keeps both its eaten and logged time.
 4. **Browse**: the bottom keyboard opens **Today**, **History** and **Menu**:
    - **Day view**: progress bars and a tappable meal list; step back through previous days.
    - **Week**: a 7-day chart.
@@ -84,7 +86,7 @@ All SQL lives in `src/db/`; handlers only call typed repository methods.
 | Table | Purpose |
 |---|---|
 | `users` | Telegram id, chat id, setup step, profile, timezone offset, daily goals, pending Fix target |
-| `meals` | time, title, AI item breakdown (JSON), totals, Telegram photo file ids, the user's text |
+| `meals` | `eaten_at` (when it was eaten, settable by the AI), `logged_at` (when the message was sent), title, AI item breakdown (JSON), totals, Telegram photo file ids, the user's text |
 | `meal_revisions` | snapshot before each create/edit/delete, for Undo (kept 30 days) |
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
 | `rate_limits` | per-user fixed-window counters (kept 2 days) |

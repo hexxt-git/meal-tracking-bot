@@ -61,3 +61,28 @@ export function localDayLabel(d: Date, offsetMin: number): string {
     weekday: "short", day: "numeric", month: "short", timeZone: "UTC",
   }).replace(",", "");
 }
+
+/** ISO 8601 with the user's offset, e.g. "2026-10-19T13:42:00+01:00". */
+export function localIso(d: Date, offsetMin: number): string {
+  return `${new Date(d.getTime() + offsetMin * 60_000).toISOString().slice(0, 19)}${isoOffset(offsetMin)}`;
+}
+
+/** "Mon 2026-10-19 13:42": weekday included so the model can resolve "on Saturday" or "yesterday". */
+export function localStamp(d: Date, offsetMin: number): string {
+  const weekday = new Date(d.getTime() + offsetMin * 60_000).toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" });
+  return `${weekday} ${localTime(d, offsetMin)}`;
+}
+
+const SAME_TIME_MS = 15 * 60_000;
+
+/**
+ * When a meal was eaten, plus when it was logged if that differs meaningfully.
+ * "13:42" · "10:00, logged 13:42" · "Sun 18 Oct 20:00, logged Mon 19 Oct 09:10"
+ */
+export function mealTimeLabel(eatenAt: Date, loggedAt: Date, offsetMin: number): string {
+  const day = (d: Date) => localTime(d, offsetMin).slice(0, 10);
+  const at = (d: Date, withDay: boolean) => `${withDay ? `${localDayLabel(d, offsetMin)} ` : ""}${localTime(d, offsetMin).slice(11)}`;
+  if (Math.abs(eatenAt.getTime() - loggedAt.getTime()) < SAME_TIME_MS) return at(eatenAt, false);
+  const sameDay = day(eatenAt) === day(loggedAt);
+  return `${at(eatenAt, !sameDay)}, logged ${at(loggedAt, !sameDay)}`;
+}

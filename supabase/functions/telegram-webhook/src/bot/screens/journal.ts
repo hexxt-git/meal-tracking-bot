@@ -74,7 +74,10 @@ export async function mealView(ctx: Ctx, mealId: string, origin: Origin): Promis
   const m = await ctx.db.meals.byId(mealId);
   if (!m) return { text: "This meal no longer exists.", keyboard: [[backButton(origin)]] };
   return {
-    text: `<b>${esc(m.description)}</b>\n${dayLabel(m.eatenAt, ctx.user)}  ·  ${clock(m.eatenAt, ctx.user)}\n\n${mealBody(m)}`,
+    text: `<b>${esc(m.description)}</b>\n${table([
+      ["Eaten", `${dayLabel(m.eatenAt, ctx.user)}  ${clock(m.eatenAt, ctx.user)}`],
+      ["Logged", `${dayLabel(m.loggedAt, ctx.user)}  ${clock(m.loggedAt, ctx.user)}`],
+    ], ["l", "l"])}${mealBody(m)}`,
     keyboard: [[btn("Delete", `del:${m.id}:${origin}`), backButton(origin)]],
   };
 }
@@ -101,10 +104,10 @@ export async function exportCsv(ctx: Ctx): Promise<Reply> {
   const meals = await ctx.db.meals.all();
   if (!meals.length) return { toast: "No meals logged yet" };
   const cell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const header = "eaten_at_utc,local_date,local_time,description,kcal,protein_g,carbs_g,fat_g,items,note";
+  const header = "eaten_at_utc,eaten_local_date,eaten_local_time,logged_at_utc,description,kcal,protein_g,carbs_g,fat_g,items,note";
   const csv = meals.map((m) =>
     [
-      m.eatenAt.toISOString(), dayLabel(m.eatenAt, ctx.user), clock(m.eatenAt, ctx.user), m.description,
+      m.eatenAt.toISOString(), dayLabel(m.eatenAt, ctx.user), clock(m.eatenAt, ctx.user), m.loggedAt.toISOString(), m.description,
       m.kcal, m.proteinG, m.carbsG, m.fatG, JSON.stringify(m.items), m.userNote,
     ].map(cell).join(",")
   );

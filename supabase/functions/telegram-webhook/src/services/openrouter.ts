@@ -1,6 +1,6 @@
 import { config } from "../config.ts";
 import { MealItem, sanitizeItems } from "../domain/meal.ts";
-import { MEAL_DECISION_SCHEMA, mealSystemPrompt, RecentMeal } from "./prompt.ts";
+import { MEAL_DECISION_SCHEMA, mealSystemPrompt, RecentMeal, TimeContext } from "./prompt.ts";
 
 const ENDPOINT = "https://openrouter.ai/api/v1";
 
@@ -37,8 +37,7 @@ export async function analyzeMeal(input: {
   apiKey: string;
   text: string;
   media: Media[];
-  localNow: string;
-  offset: string;
+  now: TimeContext;
   recent: RecentMeal[];
   fixMealId: string | null;
 }): Promise<Decision> {

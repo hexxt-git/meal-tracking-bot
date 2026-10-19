@@ -7,6 +7,8 @@ const toSnapshot = (m: Meal): MealSnapshot => JSON.parse(JSON.stringify(m));
 const fromSnapshot = (s: MealSnapshot): Meal => ({
   ...s,
   eatenAt: new Date(s.eatenAt),
+  // Snapshots taken before logged_at existed fall back to the creation time.
+  loggedAt: new Date(s.loggedAt ?? s.createdAt),
   createdAt: new Date(s.createdAt),
   updatedAt: new Date(s.updatedAt),
 });
@@ -23,7 +25,8 @@ export function mealsRepo(run: Run) {
   return {
     byId: (id: string) => run(async (tx) => (await tx.select().from(meals).where(eq(meals.id, id)))[0] ?? null),
 
-    latest: (limit: number) => run((tx) => tx.select().from(meals).orderBy(desc(meals.eatenAt)).limit(limit)),
+    /** Most recently logged first (not eaten), so "it" means the meal the user just sent. */
+    recentlyLogged: (limit: number) => run((tx) => tx.select().from(meals).orderBy(desc(meals.loggedAt)).limit(limit)),
 
     since: (from: Date) => run((tx) => tx.select().from(meals).where(gte(meals.eatenAt, from)).orderBy(asc(meals.eatenAt))),
 

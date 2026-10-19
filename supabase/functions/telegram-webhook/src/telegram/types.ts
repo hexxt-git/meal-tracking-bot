@@ -6,6 +6,8 @@ export type FileRef = { file_id: string; mime_type?: string };
 
 export type Message = {
   message_id: number;
+  /** Unix seconds when the user sent it. */
+  date: number;
   from: From;
   chat: Chat;
   text?: string;
