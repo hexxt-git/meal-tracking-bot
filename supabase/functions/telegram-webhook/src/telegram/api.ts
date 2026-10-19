@@ -1,5 +1,5 @@
 import { config } from "../config.ts";
-import type { Button, Keyboard } from "./types.ts";
+import type { Keyboard } from "./types.ts";
 
 const API = `https://api.telegram.org/bot${config.telegramToken}`;
 
@@ -15,14 +15,34 @@ async function call<T = any>(method: string, body: Record<string, unknown> | For
 
 const markup = (keyboard?: Keyboard) => (keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {});
 
+const isNotModified = (e: unknown) => e instanceof Error && e.message.includes("message is not modified");
+
 export const telegram = {
   call,
 
   send: (chatId: number, html: string, keyboard?: Keyboard) =>
     call("sendMessage", { chat_id: chatId, text: html, parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup(keyboard) }),
 
+  /** Sends with a persistent reply keyboard under the input field. Each inner array is one row of button labels. */
+  sendWithReplyKeyboard: (chatId: number, html: string, rows: string[][]) =>
+    call("sendMessage", {
+      chat_id: chatId,
+      text: html,
+      parse_mode: "HTML",
+      reply_markup: { keyboard: rows.map((r) => r.map((text) => ({ text }))), resize_keyboard: true, is_persistent: true },
+    }),
+
   edit: (chatId: number, messageId: number, html: string, keyboard: Keyboard = []) =>
-    call("editMessageText", { chat_id: chatId, message_id: messageId, text: html, parse_mode: "HTML", ...markup(keyboard) }),
+    call("editMessageText", {
+      chat_id: chatId,
+      message_id: messageId,
+      text: html,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...markup(keyboard),
+    }).catch((e) => {
+      if (!isNotModified(e)) throw e;
+    }),
 
   answerCallback: (id: string, text?: string) => call("answerCallbackQuery", { callback_query_id: id, ...(text && { text }) }),
 
@@ -46,13 +66,5 @@ export const telegram = {
     return new Uint8Array(await res.arrayBuffer());
   },
 };
-
-export const btn = (text: string, data: string): Button => ({ text, callback_data: data });
-
-export function grid(buttons: Button[], perRow: number): Keyboard {
-  const rows: Keyboard = [];
-  for (let i = 0; i < buttons.length; i += perRow) rows.push(buttons.slice(i, i + perRow));
-  return rows;
-}
 
 export const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

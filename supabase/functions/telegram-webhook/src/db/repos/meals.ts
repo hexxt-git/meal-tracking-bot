@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt } from "drizzle-orm";
 import type { Run, Tx } from "../client.ts";
 import { Meal, mealRevisions, meals, MealSnapshot, NewMeal } from "../schema.ts";
 
@@ -27,6 +27,18 @@ export function mealsRepo(run: Run) {
 
     since: (from: Date) => run((tx) => tx.select().from(meals).where(gte(meals.eatenAt, from)).orderBy(asc(meals.eatenAt))),
 
+    /** Meals in [from, to), oldest first. */
+    between: (from: Date, to: Date) =>
+      run((tx) =>
+        tx.select().from(meals).where(and(gte(meals.eatenAt, from), lt(meals.eatenAt, to))).orderBy(asc(meals.eatenAt))
+      ),
+
+    /** Newest first; fetches one extra row so callers can tell whether another page exists. */
+    page: async (page: number, size: number) => {
+      const rows = await run((tx) => tx.select().from(meals).orderBy(desc(meals.eatenAt)).limit(size + 1).offset(page * size));
+      return { meals: rows.slice(0, size), hasMore: rows.length > size };
+    },
+
     all: () => run((tx) => tx.select().from(meals).orderBy(asc(meals.eatenAt))),
 
     /** Inserts the meal and an undo record for it. */
@@ -53,7 +65,7 @@ export function mealsRepo(run: Run) {
         return before ? await recordRevision(tx, id, before) : null;
       }),
 
-    /** Reverts one create/update/delete. False if it was already undone. */
+    /** Reverts one create/update/delete. Null if it was already undone. */
     undo: (revisionId: string) =>
       run(async (tx) => {
         const [rev] = await tx
@@ -61,17 +73,17 @@ export function mealsRepo(run: Run) {
           .set({ undoneAt: new Date() })
           .where(and(eq(mealRevisions.id, revisionId), isNull(mealRevisions.undoneAt)))
           .returning();
-        if (!rev) return false;
+        if (!rev) return null;
         if (!rev.before) {
-          await tx.delete(meals).where(eq(meals.id, rev.mealId));
-          return true;
+          const [gone] = await tx.delete(meals).where(eq(meals.id, rev.mealId)).returning({ description: meals.description });
+          return { mealId: rev.mealId, description: gone?.description ?? "meal", restored: false };
         }
         const { id: _id, tgId: _tg, createdAt: _c, updatedAt: _u, ...restorable } = fromSnapshot(rev.before);
         await tx
           .insert(meals)
           .values({ id: rev.mealId, ...restorable })
           .onConflictDoUpdate({ target: meals.id, set: restorable });
-        return true;
+        return { mealId: rev.mealId, description: restorable.description, restored: true };
       }),
   };
 }

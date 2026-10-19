@@ -39,26 +39,3 @@ export function computeTargets(p: Profile): Targets {
 }
 
 export const LB_PER_KG = 2.20462;
-
-/** Accepts "180", "180cm", "5'10", "5'10\"", "5 10", "70in". Returns cm. */
-export function parseHeight(input: string, units: "metric" | "imperial"): number | null {
-  const s = input.trim().toLowerCase();
-  const ftIn = s.match(/^(\d)\s*(?:'|ft|\s)\s*(\d{1,2})?\s*(?:"|in)?$/);
-  if (ftIn) return round1((Number(ftIn[1]) * 12 + Number(ftIn[2] ?? 0)) * 2.54);
-  const num = s.match(/^(\d+(?:[.,]\d+)?)\s*(cm|in|m)?$/);
-  if (!num) return null;
-  const n = Number(num[1].replace(",", "."));
-  const unit = num[2] ?? (units === "imperial" ? "in" : n < 3 ? "m" : "cm");
-  return round1(unit === "in" ? n * 2.54 : unit === "m" ? n * 100 : n);
-}
-
-/** Accepts "72", "72kg", "160lb". Returns kg. */
-export function parseWeight(input: string, units: "metric" | "imperial"): number | null {
-  const m = input.trim().toLowerCase().match(/^(\d+(?:[.,]\d+)?)\s*(kg|lbs?)?$/);
-  if (!m) return null;
-  const n = Number(m[1].replace(",", "."));
-  const unit = m[2] ?? (units === "imperial" ? "lb" : "kg");
-  return round1(unit.startsWith("lb") ? n / LB_PER_KG : n);
-}
-
-const round1 = (n: number) => Math.round(n * 10) / 10;

@@ -6,20 +6,22 @@ import { analyzeMeal, Decision, Media, OpenRouterError } from "../services/openr
 import { esc, telegram } from "../telegram/api.ts";
 import type { FileRef, Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
-import { fmtMeal, fmtProgress, fmtTotals, KEY_PROMPT, LOG_HINT, mealActions } from "./views.ts";
+import { clock, mealBody } from "./format.ts";
+import { welcomeView } from "./screens/onboarding.ts";
+import { btn, LOG_HINT, num } from "./ui.ts";
 
 type Input = { text: string; photoIds: string[]; imageMime: string; audio: FileRef | null };
 
 export async function logMeal(ctx: Ctx, msg: Message) {
   const input = await collectInput(ctx, msg);
   if (!input) return;
-  if (!input.text && !input.photoIds.length && !input.audio) return ctx.reply("I can log meals from photos, text or voice notes.");
+  if (!input.text && !input.photoIds.length && !input.audio) return ctx.send(LOG_HINT);
 
   const apiKey = await ctx.db.keys.get();
-  if (!apiKey) return ctx.reply(`You need an OpenRouter key before I can log meals.\n\n${KEY_PROMPT}`);
+  if (!apiKey) return ctx.send(welcomeView());
 
   if (!(await ctx.db.limits.hit("ai", config.limits.analysesPerDay, "1 day"))) {
-    return ctx.reply(`You've hit the daily limit of ${config.limits.analysesPerDay} analyses. It resets at midnight UTC.`);
+    return ctx.send(`You've reached the daily limit of ${config.limits.analysesPerDay} analyses. It resets at midnight UTC.`);
   }
   await telegram.typing(ctx.user.chatId);
 
@@ -41,13 +43,13 @@ export async function logMeal(ctx: Ctx, msg: Message) {
       fixMealId: ctx.user.fixMealId,
     });
   } catch (e) {
-    if (e instanceof OpenRouterError) return ctx.reply(openRouterMessage(e));
+    if (e instanceof OpenRouterError) return ctx.send(openRouterMessage(e));
     throw e;
   }
   if (ctx.user.fixMealId) ctx.user = await ctx.db.users.update({ fixMealId: null });
 
   if (decision.action === "not_meal" || !decision.items.length) {
-    return ctx.reply(`${esc(decision.reply || "That doesn't look like a meal.")}\n\n${LOG_HINT} /help for commands.`);
+    return ctx.send(`${esc(decision.reply || "That doesn't look like a meal.")}\n\n${LOG_HINT}`);
   }
 
   const target = decision.action === "edit" ? recent.find((m) => m.id === decision.target_meal_id) : undefined;
@@ -101,7 +103,10 @@ async function applyCreate(ctx: Ctx, decision: Decision, input: Input, messageId
     photoFileIds: input.photoIds,
     sourceMessageId: messageId,
   });
-  return ctx.reply(`🍽 ${fmtMeal(meal, ctx.user, decision.reply)}\n\n${await todayLine(ctx)}`, mealActions(meal.id, revisionId));
+  return ctx.send({
+    text: `<b>${esc(meal.description)}</b>  ·  ${clock(meal.eatenAt, ctx.user)}\n\n${mealBody(meal)}${note(decision)}\n\n${await todayLine(ctx)}`,
+    keyboard: mealActions(meal.id, revisionId),
+  });
 }
 
 async function applyEdit(ctx: Ctx, target: Meal, decision: Decision, input: Input) {
@@ -113,17 +118,22 @@ async function applyEdit(ctx: Ctx, target: Meal, decision: Decision, input: Inpu
     photoFileIds: [...target.photoFileIds, ...input.photoIds],
     userNote: [target.userNote, input.text].filter(Boolean).join("\n") || null,
   });
-  if (!result) return ctx.reply("That meal no longer exists.");
+  if (!result) return ctx.send("That meal no longer exists.");
   const { meal, before, revisionId } = result;
-  return ctx.reply(
-    `✏️ <b>Updated:</b> ${fmtMeal(meal, ctx.user, decision.reply)}\nwas <s>${fmtTotals(before)}</s>\n\n${await todayLine(ctx)}`,
-    mealActions(meal.id, revisionId),
-  );
+  return ctx.send({
+    text: `Updated <b>${esc(meal.description)}</b>  ·  ${clock(meal.eatenAt, ctx.user)}\n\n${mealBody(meal)}\nWas ${num(before.kcal)} kcal.${note(decision)}\n\n${await todayLine(ctx)}`,
+    keyboard: mealActions(meal.id, revisionId),
+  });
 }
 
-export async function todayLine(ctx: Ctx) {
-  const meals = await ctx.db.meals.since(dayStart(ctx.user.utcOffsetMinutes));
-  return `<b>Today:</b> ${fmtProgress(sumTotals(meals), ctx.user)}`;
+const mealActions = (mealId: string, revisionId: string) => [[btn("Undo", `undo:${revisionId}`), btn("Fix", `fix:${mealId}`), btn("Today", "day:0")]];
+
+const note = (d: Decision) => (d.reply ? `\n<i>${esc(d.reply)}</i>` : "");
+
+async function todayLine(ctx: Ctx) {
+  const t = sumTotals(await ctx.db.meals.since(dayStart(ctx.user.utcOffsetMinutes)));
+  const goal = ctx.user.targetKcal ? ` / ${num(ctx.user.targetKcal)}` : "";
+  return `Today  ${num(t.kcal)}${goal} kcal`;
 }
 
 function audioFormat(mime?: string) {
@@ -135,8 +145,8 @@ function audioFormat(mime?: string) {
 }
 
 function openRouterMessage(e: OpenRouterError) {
-  if (e.status === 401) return "🔑 OpenRouter rejected your key. Paste a new one (/setkey).";
-  if (e.status === 402) return "💳 Your OpenRouter account is out of credits. Top up at https://openrouter.ai/credits and try again.";
+  if (e.status === 401) return "OpenRouter rejected your API key. Paste a new one into the chat, or replace it in Menu → Settings.";
+  if (e.status === 402) return "Your OpenRouter account is out of credits. Top up at https://openrouter.ai/credits and try again.";
   if (e.status === 429) return "OpenRouter is rate limiting your key. Try again in a minute.";
   return `OpenRouter error: ${esc(e.message)}. Please try again.`;
 }

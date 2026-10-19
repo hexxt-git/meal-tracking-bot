@@ -31,5 +31,5 @@ export type Update = {
   my_chat_member?: { chat: Chat; from: From };
 };
 
-export type Button = { text: string; callback_data: string };
+export type Button = { text: string; callback_data: string } | { text: string; url: string };
 export type Keyboard = Button[][];

@@ -1,16 +1,20 @@
 import { assertEquals } from "@std/assert";
 import { itemTotals } from "../src/domain/meal.ts";
-import { nextStep, parseChoice, parseTextAnswer, ProfileState, stepAfterKey } from "../src/domain/onboarding.ts";
-import { dayStart, groupByLocalDay, isoOffset, localTime, parseEatenAt } from "../src/domain/time.ts";
+import { clampStep, nextStep, parseChoice, prevStep, ProfileState, stepAfterKey, stepper } from "../src/domain/onboarding.ts";
+import { clampGoal } from "../src/domain/goals.ts";
+import { dayStart, groupByLocalDay, isoOffset, localDayLabel, localTime, parseEatenAt, TZ_OFFSETS, TZ_PAGES, tzPage, tzPageOf } from "../src/domain/time.ts";
 
 const state: ProfileState = {
   units: "metric", sex: null, age: null, heightCm: null, weightKg: null, activity: null, objective: null, paceKgPerWeek: null,
 };
 
-Deno.test("onboarding skips pace when maintaining", () => {
-  assertEquals(nextStep("objective", { objective: "maintain" }), "timezone");
-  assertEquals(nextStep("objective", { objective: "lose" }), "pace");
-  assertEquals(nextStep("timezone", {}), "done");
+Deno.test("onboarding skips pace when maintaining, both ways", () => {
+  assertEquals(nextStep("objective", "maintain"), "timezone");
+  assertEquals(nextStep("objective", "lose"), "pace");
+  assertEquals(nextStep("timezone", null), "done");
+  assertEquals(prevStep("timezone", "maintain"), "objective");
+  assertEquals(prevStep("timezone", "lose"), "pace");
+  assertEquals(prevStep("units", null), null);
 });
 
 Deno.test("key step leads into the profile only on first setup", () => {
@@ -20,19 +24,38 @@ Deno.test("key step leads into the profile only on first setup", () => {
 });
 
 Deno.test("button answers are validated against the step", () => {
-  assertEquals(parseChoice("sex", "male", state)?.patch, { sex: "male" });
+  assertEquals(parseChoice("sex", "male", state), { sex: "male" });
   assertEquals(parseChoice("sex", "robot", state), null);
-  assertEquals(parseChoice("pace", "0.5", { ...state, objective: "lose" })?.patch, { paceKgPerWeek: 0.5 });
+  assertEquals(parseChoice("pace", "0.5", { ...state, objective: "lose" }), { paceKgPerWeek: 0.5 });
   assertEquals(parseChoice("pace", "0.75", { ...state, objective: "gain" }), null);
-  assertEquals(parseChoice("timezone", "60", state)?.label, "UTC+01:00");
+  assertEquals(parseChoice("timezone", "60", state), { utcOffsetMinutes: 60 });
   assertEquals(parseChoice("timezone", "61", state), null);
-  assertEquals(parseChoice("objective", "maintain", state)?.patch, { objective: "maintain", paceKgPerWeek: 0 });
+  assertEquals(parseChoice("objective", "maintain", state), { objective: "maintain", paceKgPerWeek: 0 });
 });
 
-Deno.test("text answers", () => {
-  assertEquals(parseTextAnswer("age", "29", "metric"), { patch: { age: 29 } });
-  assertEquals("error" in parseTextAnswer("age", "abc", "metric"), true);
-  assertEquals(parseTextAnswer("weight", "170", "imperial"), { patch: { weightKg: 77.1 } });
+Deno.test("steppers convert display units and clamp forged values", () => {
+  const h = stepper("height", { ...state, units: "imperial" });
+  assertEquals(h.initial, 67);
+  assertEquals(h.format(70), `5'10"`);
+  assertEquals(h.toPatch(70), { heightCm: 177.8 });
+  assertEquals(clampStep(h, 999), 90);
+  const w = stepper("weight", { ...state, weightKg: 81.3 });
+  assertEquals(w.initial, 81.3);
+  assertEquals(clampStep(w, 72.26), 72.5);
+  assertEquals(clampStep(w, NaN), 81.3);
+  assertEquals(stepper("weight", { ...state, units: "imperial", weightKg: 72.6 }).initial, 160);
+});
+
+Deno.test("goal values are clamped", () => {
+  assertEquals(clampGoal("kcal", 50), 1000);
+  assertEquals(clampGoal("protein", 162.4), 162);
+  assertEquals(clampGoal("fat", NaN), 70);
+});
+
+Deno.test("timezone pages cover every offset once", () => {
+  const all = Array.from({ length: TZ_PAGES }, (_, p) => tzPage(p)).flat();
+  assertEquals(all, TZ_OFFSETS);
+  assertEquals(tzPage(tzPageOf(60)).includes(60), true);
 });
 
 Deno.test("local day boundaries", () => {
@@ -42,6 +65,7 @@ Deno.test("local day boundaries", () => {
   assertEquals(dayStart(-300, 1, now).toISOString(), "2026-10-18T05:00:00.000Z");
   assertEquals(isoOffset(-570), "-09:30");
   assertEquals(localTime(new Date(now), 60), "2026-10-20 00:30");
+  assertEquals(localDayLabel(new Date(now), 60), "Tue 20 Oct");
 });
 
 Deno.test("eaten_at sanity window", () => {

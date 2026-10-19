@@ -15,10 +15,10 @@ async function call(method: string, body: Record<string, unknown> | FormData) {
 }
 
 await call("setMyName", { name: "Meal Tracker" });
-await call("setMyShortDescription", { short_description: "Snap your meals, get calories & macros. Bring your own OpenRouter key." });
+await call("setMyShortDescription", { short_description: "Log meals from a photo, text or voice note. Tracks calories and macros against your goals." });
 await call("setMyDescription", {
-  description: "📸 Send a photo, text or voice note of what you ate and I'll log calories, protein, carbs and fat.\n\n" +
-    "🎯 Personal daily targets from a quick onboarding\n📊 /today, /week, /history and CSV export\n🔑 Uses your own OpenRouter key, stored encrypted\n\nTap Start to begin.",
+  description: "Send a photo, a short description or a voice note of what you ate. Calories, protein, carbs and fat are estimated " +
+    "and tracked against daily goals set from a short setup.\n\nUses your own OpenRouter API key, stored encrypted.\n\nTap Start to begin.",
 });
 await call("setMyCommands", { commands: COMMAND_MENU.map(([command, description]) => ({ command, description })) });
 

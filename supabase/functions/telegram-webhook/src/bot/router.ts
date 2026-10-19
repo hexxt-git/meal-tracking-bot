@@ -1,15 +1,13 @@
 import { config } from "../config.ts";
 import { userDb } from "../db/index.ts";
-import { TEXT_STEPS } from "../domain/onboarding.ts";
 import { looksLikeKey } from "../services/openrouter.ts";
 import { telegram } from "../telegram/api.ts";
 import type { Message, Update } from "../telegram/types.ts";
 import { runCallback } from "./callbacks.ts";
-import { runCommand } from "./commands.ts";
+import { runCommand, runReplyKey } from "./commands.ts";
 import { createCtx, Ctx } from "./context.ts";
 import { logMeal } from "./meals.ts";
-import { answerText, saveKey } from "./onboarding.ts";
-import { KEY_PROMPT } from "./views.ts";
+import { saveKey, stepView, welcomeView } from "./screens/onboarding.ts";
 
 export async function handleUpdate(update: Update) {
   const chat = update.message?.chat ?? update.callback_query?.message?.chat ?? update.my_chat_member?.chat;
@@ -30,7 +28,7 @@ export async function handleUpdate(update: Update) {
 
   const cb = update.callback_query;
   if (admission.status === "rate_limited") {
-    if (cb) return void await telegram.answerCallback(cb.id, "Slow down a little 🙂");
+    if (cb) return void await telegram.answerCallback(cb.id, "Too many requests. Try again in a bit.");
     return void await telegram.send(chat.id, "You're sending messages too fast. Please try again in a bit.");
   }
 
@@ -40,16 +38,19 @@ export async function handleUpdate(update: Update) {
     else if (update.message) await routeMessage(ctx, update.message);
   } catch (e) {
     console.error(e);
-    if (cb) await telegram.answerCallback(cb.id).catch(() => {});
-    await ctx.reply("⚠️ Something went wrong. Please try again.").catch(() => {});
+    if (cb) await telegram.answerCallback(cb.id, "Something went wrong").catch(() => {});
+    else await ctx.send("Something went wrong. Please try again.").catch(() => {});
   }
 }
 
 function routeMessage(ctx: Ctx, msg: Message) {
-  const step = ctx.user.onboardingStep;
-  if (msg.text?.startsWith("/")) return runCommand(ctx, msg);
-  if (msg.text && looksLikeKey(msg.text)) return saveKey(ctx, msg.text.trim(), msg.message_id);
-  if (msg.text && step === "key") return ctx.reply(KEY_PROMPT);
-  if (msg.text && TEXT_STEPS.includes(step)) return answerText(ctx, msg.text);
+  const text = msg.text?.trim();
+  if (text?.startsWith("/")) return runCommand(ctx, msg);
+  if (text && looksLikeKey(text)) return saveKey(ctx, text, msg.message_id);
+  if (ctx.user.onboardingStep === "key") return ctx.send(welcomeView());
+  const nav = text ? runReplyKey(ctx, text) : null;
+  if (nav) return nav;
+  // During setup, typed text would be ambiguous, so re-show the current step instead of logging it as a meal.
+  if (text && ctx.user.onboardingStep !== "done") return ctx.send(stepView(ctx));
   return logMeal(ctx, msg);
 }

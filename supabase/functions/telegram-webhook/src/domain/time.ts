@@ -1,9 +1,10 @@
 const DAY_MS = 86_400_000;
 
+/** Whole-hour zones first (UTC−12…+14), then the common fractional ones, so pickers can page through hours first. */
 export const TZ_OFFSETS = [
   ...Array.from({ length: 27 }, (_, i) => (i - 12) * 60),
   210, 270, 330, 345, 570,
-].sort((a, b) => a - b);
+];
 
 /** -300 → "-05:00" */
 export function isoOffset(min: number): string {
@@ -41,4 +42,22 @@ export function groupByLocalDay<T extends { eatenAt: Date }>(rows: T[], offsetMi
     days.set(day, [...(days.get(day) ?? []), r]);
   }
   return days;
+}
+
+export const TZ_PAGE_SIZE = 12;
+export const TZ_PAGES = Math.ceil(TZ_OFFSETS.length / TZ_PAGE_SIZE);
+
+export function tzPage(page: number): number[] {
+  return TZ_OFFSETS.slice(page * TZ_PAGE_SIZE, (page + 1) * TZ_PAGE_SIZE);
+}
+
+export function tzPageOf(offsetMin: number): number {
+  return Math.max(0, Math.floor(TZ_OFFSETS.indexOf(offsetMin) / TZ_PAGE_SIZE));
+}
+
+/** "Mon 19 Oct" for the local date of `d`. */
+export function localDayLabel(d: Date, offsetMin: number): string {
+  return new Date(d.getTime() + offsetMin * 60_000).toLocaleDateString("en-GB", {
+    weekday: "short", day: "numeric", month: "short", timeZone: "UTC",
+  }).replace(",", "");
 }

@@ -1,64 +1,67 @@
-import type { Step } from "../domain/onboarding.ts";
-import { fmtOffset, TZ_OFFSETS } from "../domain/time.ts";
-import { btn, esc, telegram } from "../telegram/api.ts";
+import { esc, telegram } from "../telegram/api.ts";
 import type { CallbackQuery } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
-import { answerChoice, skip } from "./onboarding.ts";
+import { accountAction, helpView, keyAction, menuView, profileView, settingsTimezone, settingsView, setUnits } from "./screens/account.ts";
+import { editGoal, goalsView, recalcGoals, saveGoal } from "./screens/goals.ts";
+import { dayView, deleteMeal, exportCsv, historyView, mealView, undo, weekView } from "./screens/journal.ts";
+import { onboardingAction, startProfile, stepView } from "./screens/onboarding.ts";
+import { btn, Reply } from "./ui.ts";
 
-type Handler = (ctx: Ctx, cb: CallbackQuery, args: string[]) => Promise<string | void>;
+type Handler = (ctx: Ctx, args: string[]) => Promise<Reply> | Reply;
 
-const original = (cb: CallbackQuery) => esc(cb.message?.text ?? "");
-const editSource = (ctx: Ctx, cb: CallbackQuery, html: string) => telegram.edit(ctx.user.chatId, cb.message!.message_id, html);
+const int = (s: string | undefined) => Math.max(0, Number.parseInt(s ?? "0", 10) || 0);
 
-// Each handler returns an optional toast text for answerCallbackQuery.
+// Callback data is `<kind>:<arg>:<arg>…`, kept under Telegram's 64-byte limit.
 const HANDLERS: Record<string, Handler> = {
-  async ob(ctx, cb, [step, value]) {
-    if (step === "skip") {
-      await editSource(ctx, cb, `${original(cb)}\n<b>→ Skipped</b>`);
-      await skip(ctx);
-      return;
+  menu: () => ({ view: menuView() }),
+  help: () => ({ view: helpView() }),
+  day: async (ctx, [n]) => ({ view: await dayView(ctx, int(n)) }),
+  week: async (ctx) => ({ view: await weekView(ctx) }),
+  hist: async (ctx, [page]) => ({ view: await historyView(ctx, int(page)) }),
+  meal: async (ctx, [id, origin]) => ({ view: await mealView(ctx, id, origin) }),
+  del: (ctx, [id, origin]) => deleteMeal(ctx, id, origin),
+  undo: (ctx, [revisionId, origin]) => undo(ctx, revisionId, origin),
+  csv: exportCsv,
+
+  goals: (ctx) => ({ view: goalsView(ctx) }),
+  ge: editGoal,
+  gs: saveGoal,
+  grc: recalcGoals,
+
+  prof: async (ctx, [action]) => ({ view: action === "edit" ? await startProfile(ctx) : profileView(ctx) }),
+  ob: onboardingAction,
+
+  set: async (ctx) => ({ view: await settingsView(ctx) }),
+  units: setUnits,
+  key: keyAction,
+  acct: accountAction,
+  tz: (ctx, [mode, ...rest]) => {
+    if (mode === "s") return settingsTimezone(ctx, rest);
+    if (ctx.user.onboardingStep !== "timezone") return { toast: "That step was already answered" };
+    return rest[0] === "p" ? { view: stepView(ctx, int(rest[1])) } : onboardingAction(ctx, ["timezone", rest[0]]);
+  },
+
+  async fix(ctx, [id]) {
+    if (!id) {
+      ctx.user = await ctx.db.users.update({ fixMealId: null });
+      return { view: { text: "Correction cancelled.", keyboard: [] } };
     }
-    const label = await answerChoice(ctx, step as Step, value);
-    if (!label) return "That question was already answered.";
-    await editSource(ctx, cb, `${original(cb)}\n<b>→ ${esc(label)}</b>`);
-  },
-
-  async tz(ctx, cb, [value]) {
-    const offset = Number(value);
-    if (!TZ_OFFSETS.includes(offset)) return;
-    ctx.user = await ctx.db.users.update({ utcOffsetMinutes: offset });
-    await editSource(ctx, cb, `🕒 Timezone set to <b>${fmtOffset(offset)}</b>.`);
-  },
-
-  async undo(ctx, cb, [revisionId]) {
-    if (!(await ctx.db.meals.undo(revisionId))) return "Already undone.";
-    await editSource(ctx, cb, `${original(cb)}\n\n<i>↩️ Undone</i>`);
-    return "Undone";
-  },
-
-  async fix(ctx, _cb, [mealId]) {
-    const meal = await ctx.db.meals.byId(mealId);
-    if (!meal) return "That meal no longer exists.";
+    const meal = await ctx.db.meals.byId(id);
+    if (!meal) return { toast: "This meal no longer exists" };
     ctx.user = await ctx.db.users.update({ fixMealId: meal.id });
-    await ctx.reply(`✏️ What should change about <b>${esc(meal.description)}</b>? Send text, a photo or a voice note.`);
-  },
-
-  async del(ctx, _cb, [mealId]) {
-    const revisionId = await ctx.db.meals.delete(mealId);
-    if (!revisionId) return "Already gone.";
-    await ctx.reply("🗑 Meal deleted.", [[btn("↩️ Undo", `undo:${revisionId}`)]]);
-    return "Deleted";
-  },
-
-  async delacct(ctx, cb, [answer]) {
-    if (answer !== "yes") return void await editSource(ctx, cb, "Cancelled. Nothing was deleted.");
-    await ctx.db.users.deleteAccount();
-    await editSource(ctx, cb, "🗑 Your account, meals and key were deleted. Send /start to begin again.");
+    return {
+      send: {
+        text: `What should change about <b>${esc(meal.description)}</b>? Reply with text, a photo or a voice note.`,
+        keyboard: [[btn("Cancel", "fix")]],
+      },
+    };
   },
 };
 
 export async function runCallback(ctx: Ctx, cb: CallbackQuery) {
   const [kind, ...args] = (cb.data ?? "").split(":");
-  const toast = await HANDLERS[kind]?.(ctx, cb, args);
-  await telegram.answerCallback(cb.id, toast || undefined);
+  const reply = await HANDLERS[kind]?.(ctx, args) ?? {};
+  if (reply.view && cb.message) await telegram.edit(ctx.user.chatId, cb.message.message_id, reply.view.text, reply.view.keyboard);
+  if (reply.send) await ctx.send(reply.send);
+  await telegram.answerCallback(cb.id, reply.toast);
 }
