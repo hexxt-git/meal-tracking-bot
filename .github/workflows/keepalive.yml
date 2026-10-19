@@ -1,0 +1,14 @@
+name: keepalive
+
+# Free Supabase projects pause after ~a week without database activity. A failed run also emails you that the bot is down.
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: curl --fail --silent --show-error --retry 3 --retry-delay 20 https://ytgudxgmriqyotqymqmx.supabase.co/functions/v1/telegram-webhook/health

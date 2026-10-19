@@ -1,5 +1,6 @@
 import { config } from "./src/config.ts";
 import { handleUpdate } from "./src/bot/router.ts";
+import { ping } from "./src/db/index.ts";
 import type { Update } from "./src/telegram/types.ts";
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
@@ -14,6 +15,10 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 Deno.serve(async (req) => {
+  if (req.method === "GET" && new URL(req.url).pathname.endsWith("/health")) {
+    await ping();
+    return new Response("ok");
+  }
   if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
 
   // verify_jwt is off for this function, so this header is the only thing proving the caller is Telegram.

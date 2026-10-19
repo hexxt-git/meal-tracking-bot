@@ -7,7 +7,7 @@ import * as schema from "./schema.ts";
 // Transaction-mode pooler: no prepared statements.
 const client = postgres(config.databaseUrl, { prepare: false, max: 3 });
 
-// Not exported: this connection bypasses RLS. All access goes through `withUser`.
+// Not exported: this connection bypasses RLS. All access goes through `userRunner`.
 const db = drizzle(client, { schema });
 
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -21,4 +21,9 @@ export function userRunner(tgId: number): Run {
       await tx.execute(sql`set local role bot_user`);
       return await fn(tx);
     });
+}
+
+/** Runs a trivial real query so Supabase sees database activity (free projects pause when idle). */
+export async function ping(): Promise<void> {
+  await db.execute(sql`select count(*) from app.users`);
 }

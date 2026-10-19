@@ -1,4 +1,5 @@
 import { userRunner } from "./client.ts";
+export { ping } from "./client.ts";
 import { albumsRepo } from "./repos/albums.ts";
 import { keysRepo } from "./repos/keys.ts";
 import { limitsRepo } from "./repos/limits.ts";
