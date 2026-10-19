@@ -30,28 +30,25 @@ export function base64(bytes: Uint8Array) {
 
 type Payload = {
   messages: { role: string; content: string | unknown[] }[];
-  tools?: unknown[];
   [k: string]: unknown;
 };
 
-type UsageChunk = {
-  choices?: { delta?: { annotations?: { url_citation?: { url?: string } }[] } }[];
-  usage?: { cost?: number; server_tool_use?: { web_search_requests?: number } };
-};
+type UsageChunk = { id?: string; usage?: { cost?: number } };
 
-/** What OpenRouter billed for one request (including server-side search), and the pages it cited. */
-export type RequestUsage = { costUsd: number; searches: number; sources: string[] };
+/** What OpenRouter billed for one request. */
+export type RequestUsage = { generationId: string | null; costUsd: number };
 
 /**
- * Streams through OpenRouter with the user's key. The payload hook adds what pi has no field for:
- * OpenRouter's server-side web search (run by the model's provider, i.e. Google Search for Gemini)
- * and voice notes, which go on the first user message as `input_audio` parts.
+ * Streams through OpenRouter with the user's key. The payload hook sets what pi has no per-request field for: a
+ * higher reasoning effort on the first request than on follow-ups, an output cap, and voice notes, which go on the
+ * first user message as `input_audio` parts.
  */
 export function openRouterStream(
   apiKey: string,
   audio: Extract<Media, { kind: "audio" }>[],
   onUsage?: (usage: RequestUsage) => void,
 ): StreamFn {
+  let requests = 0;
   return (model, context, options) =>
     models.streamSimple(model, context, {
       ...options,
@@ -59,11 +56,8 @@ export function openRouterStream(
       headers: { ...options?.headers, "x-title": "Meal Tracker" },
       onPayload: (raw) => {
         const payload = raw as Payload;
-        payload.reasoning = { effort: config.reasoningEffort };
-        payload.tools = [
-          ...(payload.tools ?? []),
-          { type: "openrouter:web_search", parameters: { engine: config.agent.searchEngine, max_uses: config.agent.maxSearchesPerRequest } },
-        ];
+        payload.reasoning = { effort: requests++ === 0 ? config.agent.firstEffort : config.agent.followUpEffort };
+        payload.max_completion_tokens = config.agent.maxOutputTokens;
         const user = payload.messages.find((m) => m.role === "user");
         if (user && audio.length) {
           const parts = typeof user.content === "string" ? [{ type: "text", text: user.content }] : user.content;
@@ -73,13 +67,43 @@ export function openRouterStream(
       },
       onProviderStreamEvent: onUsage && ((event) => {
         const chunk = event as UsageChunk;
-        const sources = (chunk.choices?.[0]?.delta?.annotations ?? []).flatMap((a) => (a.url_citation?.url ? [a.url_citation.url] : []));
-        if (sources.length) onUsage({ costUsd: 0, searches: 0, sources });
-        if (chunk.usage) {
-          onUsage({ costUsd: chunk.usage.cost ?? 0, searches: chunk.usage.server_tool_use?.web_search_requests ?? 0, sources: [] });
-        }
+        if (chunk.usage) onUsage({ generationId: chunk.id ?? null, costUsd: chunk.usage.cost ?? 0 });
       }),
     });
+}
+
+export type Research = { answer: string; sources: string[]; costUsd: number; generationId: string | null };
+
+/**
+ * One web-searched lookup in its own small request, so search results never enter the agent's context;
+ * the agent only sees this short answer.
+ */
+export async function researchFood(apiKey: string, query: string, country: string | null): Promise<Research> {
+  const where = country ? ` as sold in ${country}` : "";
+  const res = await fetch(`${ENDPOINT}/chat/completions`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json", "x-title": "Meal Tracker" },
+    body: JSON.stringify({
+      model: config.model,
+      reasoning: { effort: config.research.effort },
+      max_tokens: config.research.maxOutputTokens,
+      plugins: [{ id: "web", engine: config.research.engine, max_results: config.research.maxResults }],
+      messages: [
+        {
+          role: "system",
+          content: "You look up nutrition facts on the web. Reply in at most 6 short lines: the exact product found, " +
+            "kcal, protein, carbs and fat per 100 g (or per serving, saying which), the usual pack or serving size, and the source. " +
+            "Only report numbers you found in the search results. If nothing matches, start with NOT FOUND and name the closest comparable product with its numbers.",
+        },
+        { role: "user", content: `Nutrition facts for: ${query}${where}` },
+      ],
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.error) throw new OpenRouterError(body.error?.code ?? res.status, body.error?.message ?? `HTTP ${res.status}`);
+  const message = body.choices?.[0]?.message ?? {};
+  const sources = (message.annotations ?? []).flatMap((a: { url_citation?: { url?: string } }) => (a.url_citation?.url ? [a.url_citation.url] : []));
+  return { answer: String(message.content ?? "").trim(), sources, costUsd: body.usage?.cost ?? 0, generationId: body.id ?? null };
 }
 
 /** pi reports provider failures as "<status>: <body>". */

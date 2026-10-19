@@ -4,9 +4,9 @@ A Telegram bot ([@mmeal_tracking_bot](https://t.me/mmeal_tracking_bot)) that log
 estimates calories and macros, and tracks them against personal daily goals.
 
 It runs entirely on Supabase, with one Edge Function plus Postgres and no other server. Messages are handled by a
-tool-calling agent ([pi](https://github.com/earendil-works/pi) agent loop) on `google/gemini-3.8-flash` (reasoning effort:
-medium) through OpenRouter. It can search the web with Gemini's own Google Search, and each user pays for their own
-usage with their own API key.
+tool-calling agent ([pi](https://github.com/earendil-works/pi) agent loop) on `google/gemini-3.8-flash` (minimal
+reasoning effort) through OpenRouter. It can research food on the web, and each user pays for their own usage with
+their own API key, within a daily budget of $0.10.
 
 ## Using the bot
 
@@ -44,7 +44,7 @@ Telegram ──webhook──▶ Edge Function `telegram-webhook` ──direct Po
                          │  verifies secret header, acks at once,             │
                          │  handles the update in the background              ├─ Vault (OpenRouter keys)
                          └──────────────▶ OpenRouter (user's key)             └─ pg_cron: cleanup, keepalive
-                                          Gemini + server-side web search
+                                          Gemini, plus Exa web search for research
 ```
 
 ```
@@ -62,7 +62,7 @@ supabase/
         client.ts                  connection; `userRunner` scopes each transaction to one Telegram user
         schema.ts                  typed mirror of the migrations
         repos/                     users, meals (+ undo revisions), keys (Vault), limits, albums
-      services/                    OpenRouter: model, streaming with web search and audio, key checks
+      services/                    OpenRouter: model, streaming (effort, audio, cost), food research, key checks
       telegram/                    Bot API adapter and types
       bot/
         router.ts                  update → command / button / key / meal
@@ -82,17 +82,39 @@ All SQL lives in `src/db/`; handlers and agent tools only call typed repository 
 
 Each message starts one agent run (`src/agent/`). The model gets the current local time, the user's country, units and
 targets, and the meals logged in the last 24 hours. It works through these tools in as many turns as it needs (up to
-8, two minutes at most):
+6, 90 seconds at most):
 
 | Tool | Does |
 |---|---|
 | `log_meal` | records a new meal with its item breakdown and optional eaten time |
 | `update_meal` / `delete_meal` | changes a meal logged in the last 24 h (older meals are read-only) |
 | `read_meals` | reads meals eaten in the last 7 days |
+| `research_food` | one web-searched lookup (Exa via OpenRouter) in its own small request; only the short answer enters the agent's context. At most 2 per message |
+| `view_photos` | shows the photos again; they are attached to the first request only |
 | `ask_user` | asks a multiple-choice question and ends the run; the answer re-runs it with the Q&A in context |
-| web search | OpenRouter's `openrouter:web_search` server tool with `engine: "native"`, i.e. Google Search run by Gemini |
+| `reply` | the final message; called in the same turn as the last change, so simple messages take one request |
 
-Every write in a run shares one undo batch. The function logs each tool call and the run's billed cost.
+Every write in a run shares one undo batch. The function logs each tool call, each request's billed cost and its
+OpenRouter generation id (look one up for free with `GET https://openrouter.ai/api/v1/generation?id=…`).
+
+### Cost
+
+Measured on the test photos (billed by OpenRouter):
+
+| Message | Requests | Cost |
+|---|---|---|
+| Photo of a home-made or unbranded meal | 1 | $0.0055 |
+| Text correction ("I had it at 10am") | 1 | $0.003 |
+| Question, then the answer | 1 + 1 | $0.0017 + $0.0019 |
+| Photo of two branded products, both researched | 2 + 2 research | $0.029 at low effort (research $0.0088 each) |
+
+Reasoning tokens are most of a request's cost: the same photo cost $0.0125 at medium effort, $0.011 at low and
+$0.0055 at minimal, with similar estimates. Google's native search through OpenRouter measured $0.085 per search,
+so research uses Exa instead. Products already logged in the last day are reused instead of researched again.
+
+A typical day of 7 meal photos, 2 new branded products and a correction comes to about $0.08. Two guards keep
+every user under `config.budget.dailyUsd` ($0.10): research is switched off once the day passes $0.06, and requests
+stop at $0.10 until midnight UTC. Daily totals are stored in `app.ai_usage`.
 
 ## Security model
 
@@ -118,6 +140,7 @@ Every write in a run shares one undo batch. The function logs each tool call and
 | `meal_revisions` | snapshot before each create/edit/delete, grouped by `batch_id`, for Undo (kept 30 days) |
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
 | `rate_limits` | per-user fixed-window counters (kept 2 days) |
+| `ai_usage` | billed OpenRouter cost, runs and research lookups per user per UTC day |
 | `media_group_items` | album photos waiting to be processed together (kept 1 day) |
 
 Photos aren't stored; only Telegram `file_id`s are kept.
@@ -166,9 +189,6 @@ bun run deploy   # redeploy the function
 - **Cleanup**: the `app-cleanup` cron job runs nightly at 03:17 UTC and trims the bookkeeping tables listed above.
 - **Free tier**: 500 MB database and 500k function invocations a month. One user logging 10 meals a day uses about
   300 invocations a month.
-- **AI cost**: paid by each user on OpenRouter. Model tokens are about $0.01–0.02 per photo with Gemini 3.8 Flash.
-  Native web search is billed on top. In testing, two photo messages cost about $0.37 in total, mostly outside model
-  tokens, which points to search fees; the function logs each run's billed cost, so check it there. Set `config.agent.searchEngine` to `"exa"` (about $0.007 per search) for a cheaper engine, and lower
-  `maxSearchesPerRequest` to cap it.
+- **AI cost**: paid by each user on OpenRouter, capped at $0.10 a day per user (see [Cost](#cost)).
 - **Logs**: `GET /v1/projects/<ref>/analytics/endpoints/logs` with
   `sql=select timestamp, event_message from logs where source = 'function_logs' order by timestamp desc limit 50`.

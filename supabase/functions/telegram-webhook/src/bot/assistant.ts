@@ -82,6 +82,12 @@ async function run(ctx: Ctx, input: ChatInput, answers: QuestionAnswer[], fixMea
   if (!(await ctx.db.limits.hit("ai", config.limits.analysesPerDay, "1 day"))) {
     return ctx.send(`You've reached the daily limit of ${config.limits.analysesPerDay} requests. It resets at midnight UTC.`);
   }
+  const spent = await ctx.db.usage.todayCost();
+  if (spent >= config.budget.dailyUsd) {
+    return ctx.send(
+      `Today's AI budget of $${config.budget.dailyUsd.toFixed(2)} is used up, so I can't analyse more until midnight UTC. Your log is still available from the buttons below.`,
+    );
+  }
   if (ctx.user.pendingQuestion || ctx.user.fixMealId) ctx.user = await ctx.db.users.update({ pendingQuestion: null, fixMealId: null });
 
   const typing = setInterval(() => telegram.typing(ctx.user.chatId).catch(() => {}), 4500);
@@ -101,13 +107,18 @@ async function run(ctx: Ctx, input: ChatInput, answers: QuestionAnswer[], fixMea
       recentMeals: await ctx.db.meals.loggedSince(new Date(Date.now() - DAY_MS)),
       fixMeal: fixMealId ? await ctx.db.meals.byId(fixMealId) : null,
       answers,
+      allowResearch: spent < config.budget.researchCutoffUsd,
       trace: (line) => console.log(`[agent ${ctx.user.tgId}] ${line}`),
     });
   } finally {
     clearInterval(typing);
   }
+  await ctx.db.usage.record(result.costUsd, result.searches);
   const outcome = result.error ? `error ${result.error.status} ${result.error.message.slice(0, 200)}` : result.timedOut ? "timed out" : "ok";
-  console.log(`[agent ${ctx.user.tgId}] ${outcome}: turns ${result.turns}, searches ${result.searches}, cost $${result.costUsd.toFixed(4)}`);
+  console.log(
+    `[agent ${ctx.user.tgId}] ${outcome}: turns ${result.turns}, research ${result.searches}, cost $${result.costUsd.toFixed(4)}` +
+      `${result.hitCostCap ? " (hit cost cap)" : ""}, generations ${result.generationIds.join(",")}`,
+  );
 
   if (result.question && !result.changes.length) {
     const q: PendingQuestion = {

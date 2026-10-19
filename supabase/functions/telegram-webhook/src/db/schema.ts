@@ -1,6 +1,6 @@
 // Typed mirror of supabase/migrations (the migrations are the source of truth for DDL, RLS and grants).
 import { sql } from "drizzle-orm";
-import { bigint, boolean, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, date, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import type { MealItem } from "../domain/meal.ts";
 import type { Step, Units } from "../domain/onboarding.ts";
 import type { PendingQuestion } from "../domain/question.ts";
@@ -80,6 +80,14 @@ export const mediaGroupItems = app.table("media_group_items", {
   claimed: boolean("claimed").notNull().default(false),
   createdAt: tstz("created_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.mediaGroupId, t.messageId] })]);
+
+export const aiUsage = app.table("ai_usage", {
+  tgId: tgId(),
+  day: date("day").notNull(),
+  costUsd: decimal("cost_usd").notNull().default(0),
+  runs: integer("runs").notNull().default(0),
+  searches: integer("searches").notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.tgId, t.day] })]);
 
 export type User = typeof users.$inferSelect;
 export type UserPatch = Partial<Omit<typeof users.$inferInsert, "tgId" | "createdAt" | "updatedAt">>;

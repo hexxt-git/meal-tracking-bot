@@ -1,4 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import { TSchema, Type } from "typebox";
 import type { Meal, UserDb } from "../db/index.ts";
 import { isEditable, itemTotals, MealItem, READ_WINDOW_DAYS, sanitizeItems } from "../domain/meal.ts";
@@ -8,11 +9,17 @@ export type MealStore = Pick<UserDb["meals"], "byId" | "since" | "create" | "upd
 
 export type Change = { kind: "created" | "updated" | "deleted"; meal: Meal; before?: Meal };
 
+/** Web lookup used by `research_food`; returns a short answer and what it cost. */
+export type ResearchFn = (query: string) => Promise<{ answer: string; sources: string[]; costUsd: number }>;
+
 /** Everything the tools act on during one assistant run. */
 export class RunState {
   readonly batchId = crypto.randomUUID();
   readonly changes = new Map<string, Change>();
   question: { question: string; options: string[] } | null = null;
+  replyText: string | null = null;
+  researches = 0;
+  researchCostUsd = 0;
 
   constructor(
     readonly store: MealStore,
@@ -21,6 +28,12 @@ export class RunState {
     readonly userText: string | null,
     readonly photoIds: string[],
     readonly messageId: number,
+    readonly photos: ImageContent[] = [],
+    /** Null when research is unavailable (not configured, or today's budget is nearly used). */
+    readonly research: ResearchFn | null = null,
+    readonly maxResearch = 0,
+    /** True once the run has spent its cost cap. */
+    readonly overBudget: () => boolean = () => false,
   ) {}
 
   /** Folds successive changes to one meal into its net effect for this run. */
@@ -89,6 +102,16 @@ const cleanItems = (items: MealItem[]) => sanitizeItems(items.map((i) => ({ ...i
 
 export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
   const tools: AgentTool[] = [
+    tool({
+      name: "reply",
+      label: "Reply",
+      description: "Sends your final reply and ends the run. Call it in the same turn as your last change.",
+      parameters: Type.Object({ text: Type.String() }),
+      execute: (_id, p) => {
+        run.replyText = p.text.trim();
+        return Promise.resolve({ ...ok({ sent: true }), terminate: true });
+      },
+    }),
     tool({
       name: "read_meals",
       label: "Read meals",
@@ -164,6 +187,33 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
       },
     }),
   ];
+  if (run.photos.length) {
+    tools.push(tool({
+      name: "view_photos",
+      label: "View photos",
+      description: "Shows the user's photos again. They are only attached to the first request, to save cost.",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [{ type: "text" as const, text: "The user's photos:" }, ...run.photos], details: undefined }),
+    }));
+  }
+  if (run.research) {
+    const research = run.research;
+    tools.push(tool({
+      name: "research_food",
+      label: "Research food",
+      description: `Looks up nutrition facts on the web for one product, dish or menu item. Costs money; at most ${run.maxResearch} per message.`,
+      parameters: Type.Object({
+        query: Type.String({ description: 'Brand, product and variant, e.g. "Mahboul potato chips salted 100 g bag"' }),
+      }),
+      execute: async (_id, p) => {
+        if (run.researches >= run.maxResearch || run.overBudget()) throw new Error("No research left for this message; estimate instead");
+        const r = await research(p.query);
+        run.researches++;
+        run.researchCostUsd += r.costUsd;
+        return ok({ answer: r.answer, sources: r.sources.slice(0, 3) });
+      },
+    }));
+  }
   if (!canAsk) return tools;
   return [...tools, tool({
     name: "ask_user",

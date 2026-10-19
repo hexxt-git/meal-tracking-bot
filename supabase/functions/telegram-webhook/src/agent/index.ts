@@ -5,7 +5,7 @@ import type { Meal } from "../db/index.ts";
 import { countryName } from "../domain/countries.ts";
 import type { QuestionAnswer } from "../domain/question.ts";
 import { isoOffset, localIso, localStamp } from "../domain/time.ts";
-import { base64, chatModel, Media, openRouterStream, OpenRouterError, parseProviderError } from "../services/openrouter.ts";
+import { base64, chatModel, Media, openRouterStream, OpenRouterError, parseProviderError, researchFood } from "../services/openrouter.ts";
 import { systemPrompt } from "./prompt.ts";
 import { Change, MealStore, mealTools, RunState } from "./tools.ts";
 
@@ -34,6 +34,7 @@ export type AgentInput = {
   recentMeals: Meal[];
   fixMeal: Meal | null;
   answers: QuestionAnswer[];
+  allowResearch: boolean;
   /** Receives one line per tool call and result, for logs. */
   trace?: (line: string) => void;
 };
@@ -45,23 +46,46 @@ export type AgentResult = {
   question: { question: string; options: string[] } | null;
   error: OpenRouterError | null;
   timedOut: boolean;
-  /** As billed by OpenRouter, including search. */
+  /** As billed by OpenRouter, including research. */
   costUsd: number;
   turns: number;
   searches: number;
+  hitCostCap: boolean;
+  generationIds: string[];
 };
+
+const PHOTOS_REMOVED = (n: number) =>
+  `[${n === 1 ? "The photo was" : `${n} photos were`} attached to your first request only. Call view_photos to see ${n === 1 ? "it" : "them"} again.]`;
 
 export async function runAgent(input: AgentInput): Promise<AgentResult> {
   const u = input.user;
   const off = u.utcOffsetMinutes;
   const canAsk = input.answers.length < config.agent.maxQuestions;
-  const run = new RunState(input.store, off, input.sentAt, input.text || null, input.photoIds, input.messageId);
+  const images: ImageContent[] = input.media.flatMap((m) =>
+    m.kind === "image" ? [{ type: "image", data: base64(m.data), mimeType: m.mime }] : []
+  );
+  const country = countryName(u.country);
+  const generationIds: string[] = [];
+  let costUsd = 0;
+  const research = input.allowResearch
+    ? async (query: string) => {
+      const r = await researchFood(input.apiKey, query, country);
+      costUsd += r.costUsd;
+      if (r.generationId) generationIds.push(r.generationId);
+      input.trace?.(`research $${r.costUsd.toFixed(4)} ${r.generationId ?? ""}`);
+      return r;
+    }
+    : null;
+  const run = new RunState(
+    input.store, off, input.sentAt, input.text || null, input.photoIds, input.messageId,
+    images, research, config.agent.maxResearchPerRun, () => costUsd >= config.agent.maxRunCostUsd,
+  );
 
   const prompt = systemPrompt({
     now: localStamp(input.sentAt, off),
     nowIso: localIso(input.sentAt, off),
     offset: isoOffset(off),
-    country: countryName(u.country),
+    country,
     units: u.units,
     targets: u.targetKcal
       ? `${u.targetKcal} kcal, protein ${u.targetProteinG} g, carbs ${u.targetCarbsG} g, fat ${u.targetFatG} g`
@@ -70,24 +94,34 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     fixMeal: input.fixMeal && run.view(input.fixMeal),
     answers: input.answers,
     canAsk,
+    canResearch: research != null,
+    hasPhotos: images.length > 0,
   });
 
   let turns = 0;
-  let searches = 0;
-  let costUsd = 0;
   const agent = new Agent({
-    initialState: { systemPrompt: prompt, model: chatModel(), thinkingLevel: config.reasoningEffort, tools: mealTools(run, canAsk) },
-    streamFn: openRouterStream(input.apiKey, input.media.filter((m) => m.kind === "audio"), (u) => {
-      searches += u.searches;
-      costUsd += u.costUsd;
-      for (const url of u.sources) input.trace?.(`source ${url}`);
-      if (u.costUsd || u.searches) input.trace?.(`request cost $${u.costUsd.toFixed(4)}, searches ${u.searches}`);
+    initialState: { systemPrompt: prompt, model: chatModel(), thinkingLevel: config.agent.firstEffort, tools: mealTools(run, canAsk) },
+    streamFn: openRouterStream(input.apiKey, input.media.filter((m) => m.kind === "audio"), (usage) => {
+      costUsd += usage.costUsd;
+      if (usage.generationId) generationIds.push(usage.generationId);
+      input.trace?.(`request $${usage.costUsd.toFixed(4)} ${usage.generationId ?? ""}`);
     }),
+    // Photos are sent with the first request only; later requests get a note and can call view_photos.
+    transformContext: (messages) => {
+      if (!images.length || !messages.some((m) => m.role === "assistant")) return Promise.resolve(messages);
+      return Promise.resolve(messages.map((m) => {
+        if (m.role !== "user" || typeof m.content === "string" || !m.content.some((c) => c.type === "image")) return m;
+        const n = m.content.filter((c) => c.type === "image").length;
+        return { ...m, content: [...m.content.filter((c) => c.type !== "image"), { type: "text" as const, text: PHOTOS_REMOVED(n) }] };
+      }));
+    },
     toolExecution: "sequential",
-    finishTurn: ({ message }) => {
+    finishTurn: ({ message, toolResults }) => {
       turns++;
       if (message.stopReason === "error" || message.stopReason === "aborted") return;
+      const failed = toolResults.some((r) => r.isError);
       if (run.question || turns >= config.agent.maxTurns) return { action: "end" };
+      if (run.replyText !== null && !failed) return { action: "end" };
     },
   });
 
@@ -102,9 +136,6 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     });
   }
 
-  const images: ImageContent[] = input.media.flatMap((m) =>
-    m.kind === "image" ? [{ type: "image", data: base64(m.data), mimeType: m.mime }] : []
-  );
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
@@ -118,7 +149,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
 
   const assistant = agent.state.messages.filter((m) => m.role === "assistant");
   const last = assistant.at(-1);
-  const reply = last?.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("").trim() ?? "";
+  const reply = run.replyText ?? last?.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("").trim() ?? "";
   const errorMessage = agent.state.errorMessage;
   return {
     reply,
@@ -129,6 +160,8 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     timedOut,
     costUsd,
     turns,
-    searches,
+    searches: run.researches,
+    hitCostCap: costUsd >= config.agent.maxRunCostUsd,
+    generationIds,
   };
 }
