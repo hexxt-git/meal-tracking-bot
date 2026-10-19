@@ -13,14 +13,15 @@ supabase/
     index.ts                  HTTP entry: verifies Telegram's secret header, acks, processes in background
     src/
       config.ts               env + tunables (model, limits)
-      domain/                 pure logic: nutrition math, onboarding state machine, time/day math
+      domain/                 pure logic: nutrition math, onboarding steps and steppers, goals, time/day math
       db/                     all database access
         client.ts             drizzle client; `userRunner` runs each transaction as `bot_user` for one tg user
         schema.ts             typed mirror of the migrations
         repos/                users, meals (+ undo revisions), keys (Vault), limits, albums
       services/               OpenRouter client + prompt/schema
       telegram/               Bot API adapter and types
-      bot/                    handlers: router, commands, callbacks, onboarding, meals, reports, views
+      bot/                    router, commands, callbacks, meal logging, UI kit (ui.ts, format.ts)
+        screens/              button-driven panels: journal, onboarding, goals, account/settings, timezone picker
     tests/                    deno tests for domain logic
 scripts/setup-bot.ts          sets bot name/description/commands/avatar and the webhook
 ```
