@@ -1,0 +1,14 @@
+{
+  "name": "meal-tracking-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "supabase": "supabase",
+    "db:push": "supabase db push",
+    "deploy": "supabase functions deploy telegram-webhook --no-verify-jwt",
+    "secrets:set": "supabase secrets set --env-file supabase/.env"
+  },
+  "devDependencies": {
+    "supabase": "^2.121.0"
+  }
+}
