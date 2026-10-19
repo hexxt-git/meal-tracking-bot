@@ -1,4 +1,4 @@
--- Every table in this project is accessed only by edge functions using the secret key.
+-- No table in this project is meant to be reachable through the Data API (anon/authenticated).
 -- Strip the Data API roles of any implicit access so a forgotten grant or policy can't expose data.
 
 alter default privileges in schema public revoke all on tables from anon, authenticated;

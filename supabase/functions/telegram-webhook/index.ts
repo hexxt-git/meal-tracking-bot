@@ -1,6 +1,8 @@
-import "@supabase/functions-js/edge-runtime.d.ts";
+import { config } from "./src/config.ts";
+import { handleUpdate } from "./src/bot/router.ts";
+import type { Update } from "./src/telegram/types.ts";
 
-const WEBHOOK_SECRET = Deno.env.get("TELEGRAM_WEBHOOK_SECRET");
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
 
 function timingSafeEqual(a: string, b: string): boolean {
   const ea = new TextEncoder().encode(a);
@@ -16,13 +18,10 @@ Deno.serve(async (req) => {
 
   // verify_jwt is off for this function, so this header is the only thing proving the caller is Telegram.
   const secret = req.headers.get("x-telegram-bot-api-secret-token") ?? "";
-  if (!WEBHOOK_SECRET || !timingSafeEqual(secret, WEBHOOK_SECRET)) {
-    return new Response("unauthorized", { status: 401 });
-  }
+  if (!timingSafeEqual(secret, config.webhookSecret)) return new Response("unauthorized", { status: 401 });
 
-  const update = await req.json();
-  console.log("update", update.update_id);
-
-  // Always 200 so Telegram doesn't retry-storm on our own bugs.
+  const update: Update = await req.json();
+  // Ack immediately; AI calls can outlast Telegram's webhook timeout and would trigger redeliveries.
+  EdgeRuntime.waitUntil(handleUpdate(update).catch((e) => console.error("update", update.update_id, e)));
   return new Response("ok");
 });

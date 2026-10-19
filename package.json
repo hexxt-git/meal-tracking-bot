@@ -4,11 +4,15 @@
   "type": "module",
   "scripts": {
     "supabase": "supabase",
+    "test": "cd supabase/functions/telegram-webhook && deno test tests/",
+    "check": "cd supabase/functions/telegram-webhook && deno check index.ts && deno lint",
     "db:push": "supabase db push",
-    "deploy": "supabase functions deploy telegram-webhook --no-verify-jwt",
-    "secrets:set": "supabase secrets set --env-file supabase/.env"
+    "deploy": "supabase functions deploy telegram-webhook --no-verify-jwt --use-api",
+    "secrets:set": "supabase secrets set --env-file supabase/.env",
+    "setup:bot": "deno run --env-file=.env --allow-env --allow-net --allow-read scripts/setup-bot.ts"
   },
   "devDependencies": {
+    "deno": "^2.9.6",
     "supabase": "^2.121.0"
   }
 }

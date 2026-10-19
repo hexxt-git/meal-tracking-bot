@@ -1,5 +1,12 @@
 {
   "imports": {
-    "@supabase/functions-js": "jsr:@supabase/functions-js@^2"
+    "drizzle-orm": "npm:drizzle-orm@0.45.3",
+    "drizzle-orm/": "npm:/drizzle-orm@0.45.3/",
+    "postgres": "npm:postgres@3.4.7",
+    "@std/assert": "jsr:@std/assert@^1"
+  },
+  "tasks": {
+    "test": "deno test tests/",
+    "check": "deno check index.ts && deno lint"
   }
 }
