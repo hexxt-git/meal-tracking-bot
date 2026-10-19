@@ -22,7 +22,7 @@ import { goalsTable } from "./goals.ts";
 import { TZ_QUESTION, tzPicker } from "./timezone.ts";
 import { btn, link, LOG_HINT, REPLY_KEYBOARD, Reply, View } from "../ui.ts";
 
-export const KEYS_URL = "https://openrouter.ai/keys";
+const KEYS_URL = "https://openrouter.ai/keys";
 
 export const welcomeView = (): View => ({
   text: `<b>Meal Tracker</b>

@@ -7,10 +7,10 @@ import { bar, num, table, truncate } from "./ui.ts";
 export const clock = (d: Date, u: User) => localTime(d, u.utcOffsetMinutes).slice(11);
 export const dayLabel = (d: Date, u: User) => localDayLabel(d, u.utcOffsetMinutes);
 
-export const macroLine = (t: Totals) =>
+const macroLine = (t: Totals) =>
   `<b>${num(t.kcal)} kcal</b>  ·  P ${num(t.proteinG)} g  ·  C ${num(t.carbsG)} g  ·  F ${num(t.fatG)} g`;
 
-export function itemsTable(m: Meal): string {
+function itemsTable(m: Meal): string {
   if (!m.items.length) return "";
   return table(m.items.map((i) => [truncate(i.name, 22), truncate(i.portion, 10), num(i.kcal)]), ["l", "l", "r"]);
 }

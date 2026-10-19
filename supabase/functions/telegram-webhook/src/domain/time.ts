@@ -44,7 +44,7 @@ export function groupByLocalDay<T extends { eatenAt: Date }>(rows: T[], offsetMi
   return days;
 }
 
-export const TZ_PAGE_SIZE = 12;
+const TZ_PAGE_SIZE = 12;
 export const TZ_PAGES = Math.ceil(TZ_OFFSETS.length / TZ_PAGE_SIZE);
 
 export function tzPage(page: number): number[] {
