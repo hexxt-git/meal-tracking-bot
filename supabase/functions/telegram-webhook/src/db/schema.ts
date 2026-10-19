@@ -89,6 +89,15 @@ export const aiUsage = app.table("ai_usage", {
   searches: integer("searches").notNull().default(0),
 }, (t) => [primaryKey({ columns: [t.tgId, t.day] })]);
 
+export const chatMessages = app.table("chat_messages", {
+  tgId: tgId(),
+  messageId: bigint("message_id", { mode: "number" }).notNull(),
+  text: text("text").notNull().default(""),
+  sentAt: tstz("sent_at").notNull(),
+  batchIds: uuid("batch_ids").array().notNull().default([]),
+  createdAt: tstz("created_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.tgId, t.messageId] })]);
+
 export type User = typeof users.$inferSelect;
 export type UserPatch = Partial<Omit<typeof users.$inferInsert, "tgId" | "createdAt" | "updatedAt">>;
 export type Meal = typeof meals.$inferSelect;

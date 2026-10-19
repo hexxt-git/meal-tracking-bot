@@ -28,7 +28,7 @@ To correct something, just say so, for example "that was 2 eggs, not 3", "add a 
 
 Packaged and restaurant food is looked up online, preferring products sold in your country (set it in Settings). When an amount matters and can't be guessed, the assistant asks a quick multiple-choice question.
 
-You can also ask about your log, for example "how much protein do I have left today?"
+You can also edit a message you sent; the meal it logged is updated to match. And you can ask about your log ("how much protein do I have left today?") or about food and nutrition in general.
 
 Use Today, History and Menu at the bottom of the chat to browse what you logged, adjust your goals and change settings.`,
   keyboard: [[btn("‹ Menu", "menu")]],

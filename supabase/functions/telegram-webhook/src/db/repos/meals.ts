@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
 import type { Run, Tx } from "../client.ts";
 import { Meal, mealRevisions, meals, MealSnapshot, NewMeal } from "../schema.ts";
 
@@ -25,6 +25,15 @@ export function mealsRepo(run: Run) {
 
     /** Meals sent to the bot at or after `from`, most recent first. */
     loggedSince: (from: Date) => run((tx) => tx.select().from(meals).where(gte(meals.loggedAt, from)).orderBy(desc(meals.loggedAt))),
+
+    /** Current state of the meals that the given undo batches created or changed (deleted ones are gone). */
+    touchedBy: (batchIds: string[]) =>
+      batchIds.length
+        ? run(async (tx) => {
+          const ids = tx.selectDistinct({ id: mealRevisions.mealId }).from(mealRevisions).where(inArray(mealRevisions.batchId, batchIds));
+          return await tx.select().from(meals).where(inArray(meals.id, ids)).orderBy(asc(meals.eatenAt));
+        })
+        : Promise.resolve([]),
 
     since: (from: Date) => run((tx) => tx.select().from(meals).where(gte(meals.eatenAt, from)).orderBy(asc(meals.eatenAt))),
 

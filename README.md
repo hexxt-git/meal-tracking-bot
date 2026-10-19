@@ -16,13 +16,17 @@ their own API key, within a daily budget of $0.10.
    Mifflin-St Jeor. Protein is 1.8 g/kg (2.0 when cutting), fat is 25% of calories and carbs are the rest.
 3. **Log**: send a photo (or an album), a description or a voice note. The assistant decides what the message is: new
    meals, a correction to a logged meal ("that was 2 eggs, not 3", "I had it this morning at 10AM"), or a question
-   ("how much protein is left today?"). The reply shows every meal it logged, updated or deleted, the totals and today's
+   ("how much protein is left today?"), and it also answers general food and nutrition questions and chats briefly.
+   The reply shows every meal it logged, updated or deleted, the totals and today's
    progress, with **Undo** (reverts everything that reply changed), **Fix** and **Today** buttons. **Fix** only tells
    the assistant which meal your next message is about.
    - **Research**: before logging branded, packaged or restaurant food the assistant must look up its nutrition data
      online (a readable label in the photo counts), preferring products sold in your country.
    - **Questions**: when an unknown would swing the estimate a lot (how much of a shared bag you ate, say), it asks
      one multiple-choice question as buttons. Tap an answer or type one. At most two rounds per message.
+   - **Edits**: editing a sent message re-runs the assistant with the before and after text and the meals that message
+     logged or changed, so "2 eggs" edited to "3 eggs" updates the meal. Edits that only change case, punctuation or
+     spacing are ignored.
    - **Times**: the assistant gets the moment the message was sent, in your timezone, and resolves "this morning at
      10" or "yesterday's dinner" against it. Each meal keeps both its eaten and logged time.
 4. **Browse**: the bottom keyboard opens **Today**, **History** and **Menu**:
@@ -140,6 +144,7 @@ stop at $0.10 until midnight UTC. Daily totals are stored in `app.ai_usage`.
 | `meal_revisions` | snapshot before each create/edit/delete, grouped by `batch_id`, for Undo (kept 30 days) |
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
 | `rate_limits` | per-user fixed-window counters (kept 2 days) |
+| `chat_messages` | text of each message sent to the assistant and the undo batches its reply created, for edits (kept 3 days) |
 | `ai_usage` | billed OpenRouter cost, runs and research lookups per user per UTC day |
 | `media_group_items` | album photos waiting to be processed together (kept 1 day) |
 

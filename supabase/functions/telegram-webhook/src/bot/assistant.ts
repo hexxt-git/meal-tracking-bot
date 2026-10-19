@@ -2,7 +2,7 @@ import { AgentResult, Change, runAgent } from "../agent/index.ts";
 import { config } from "../config.ts";
 import type { Meal } from "../db/index.ts";
 import { sumTotals } from "../domain/meal.ts";
-import { ChatInput, isOpen, newQuestionId, PendingQuestion, QuestionAnswer } from "../domain/question.ts";
+import { ChatInput, isMeaningfulEdit, isOpen, newQuestionId, PendingQuestion, QuestionAnswer } from "../domain/question.ts";
 import { dayStart, mealTimeLabel } from "../domain/time.ts";
 import { Media, OpenRouterError } from "../services/openrouter.ts";
 import { esc, telegram } from "../telegram/api.ts";
@@ -19,12 +19,39 @@ export async function respond(ctx: Ctx, msg: Message) {
   const input = await collectInput(ctx, msg);
   if (!input) return;
   if (!input.text && !input.photoIds.length && !input.audio) return ctx.send(LOG_HINT);
+  await ctx.db.messages.remember(input.messageId, input.text, new Date(input.sentAt));
 
   const q = ctx.user.pendingQuestion;
   if (isOpen(q, Date.now(), config.agent.questionTtlMs) && input.text && !input.photoIds.length && !input.audio) {
     return resume(ctx, q, input.text);
   }
   return run(ctx, input, [], ctx.user.fixMealId);
+}
+
+type Edit = { before: string | null; sentAt: Date; meals: Meal[] };
+
+/**
+ * Runs the assistant on an edited message with its before and after text and the meals it logged or changed.
+ * Photos are only re-sent when the original message led to no meal.
+ */
+export async function respondToEdit(ctx: Ctx, msg: Message) {
+  const after = msg.text ?? msg.caption ?? "";
+  const stored = await ctx.db.messages.get(msg.message_id);
+  const sentAt = stored?.sentAt ?? new Date(msg.date * 1000);
+  await ctx.db.messages.remember(msg.message_id, after, sentAt);
+  if (stored && !isMeaningfulEdit(stored.text, after)) return;
+
+  const meals = await ctx.db.meals.touchedBy(stored?.batchIds ?? []);
+  const photoId = meals.length ? undefined : msg.photo?.at(-1)?.file_id;
+  const input: ChatInput = {
+    text: after,
+    photoIds: photoId ? [photoId] : [],
+    imageMime: "image/jpeg",
+    audio: null,
+    sentAt: new Date((msg.edit_date ?? msg.date) * 1000).toISOString(),
+    messageId: msg.message_id,
+  };
+  return run(ctx, input, [], null, { before: stored?.text ?? null, sentAt, meals });
 }
 
 /** `ask:<questionId>:<option>` */
@@ -76,7 +103,7 @@ async function downloadMedia(input: ChatInput): Promise<Media[]> {
   return [...images, { kind: "audio", format: audioFormat(input.audio.mime), data: await telegram.download(input.audio.fileId) }];
 }
 
-async function run(ctx: Ctx, input: ChatInput, answers: QuestionAnswer[], fixMealId: string | null) {
+async function run(ctx: Ctx, input: ChatInput, answers: QuestionAnswer[], fixMealId: string | null, edit?: Edit) {
   const apiKey = await ctx.db.keys.get();
   if (!apiKey) return ctx.send(welcomeView());
   if (!(await ctx.db.limits.hit("ai", config.limits.analysesPerDay, "1 day"))) {
@@ -108,12 +135,14 @@ async function run(ctx: Ctx, input: ChatInput, answers: QuestionAnswer[], fixMea
       fixMeal: fixMealId ? await ctx.db.meals.byId(fixMealId) : null,
       answers,
       allowResearch: spent < config.budget.researchCutoffUsd,
+      edit,
       trace: (line) => console.log(`[agent ${ctx.user.tgId}] ${line}`),
     });
   } finally {
     clearInterval(typing);
   }
   await ctx.db.usage.record(result.costUsd, result.searches);
+  if (result.changes.length) await ctx.db.messages.addBatch(input.messageId, result.batchId);
   const outcome = result.error ? `error ${result.error.status} ${result.error.message.slice(0, 200)}` : result.timedOut ? "timed out" : "ok";
   console.log(
     `[agent ${ctx.user.tgId}] ${outcome}: turns ${result.turns}, research ${result.searches}, cost $${result.costUsd.toFixed(4)}` +

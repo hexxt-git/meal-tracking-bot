@@ -4,6 +4,7 @@ import { albumsRepo } from "./repos/albums.ts";
 import { keysRepo } from "./repos/keys.ts";
 import { limitsRepo } from "./repos/limits.ts";
 import { mealsRepo } from "./repos/meals.ts";
+import { messagesRepo } from "./repos/messages.ts";
 import { usageRepo } from "./repos/usage.ts";
 import { usersRepo } from "./repos/users.ts";
 
@@ -19,6 +20,7 @@ export function userDb(tgId: number) {
     limits: limitsRepo(run),
     albums: albumsRepo(run),
     usage: usageRepo(run),
+    messages: messagesRepo(run),
   };
 }
 

@@ -27,3 +27,8 @@ export const isOpen = (q: PendingQuestion | null, now: number, ttlMs: number): q
   q != null && now - Date.parse(q.askedAt) < ttlMs;
 
 export const newQuestionId = () => crypto.randomUUID().slice(0, 8);
+
+const normalized = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/** Edits that only change case, punctuation or spacing don't change what the message says. */
+export const isMeaningfulEdit = (before: string, after: string) => normalized(before) !== normalized(after);

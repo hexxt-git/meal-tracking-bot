@@ -5,6 +5,7 @@ import { COUNTRY_LETTERS, countriesByLetter, countryName } from "../src/domain/c
 import { parseCsv, parseMealsCsv, toCsv } from "../src/domain/csv.ts";
 import { isEditable } from "../src/domain/meal.ts";
 import { nextStep, parseChoice, PROFILE_STEPS } from "../src/domain/onboarding.ts";
+import { isMeaningfulEdit } from "../src/domain/question.ts";
 
 const meal = (id: string, kcal: number): Meal => ({
   id, tgId: 1, eatenAt: new Date(0), loggedAt: new Date(0), description: id, userNote: null, items: [], kcal,
@@ -70,4 +71,10 @@ Deno.test("csv import accepts older exports and rejects other files", () => {
   const bad = parseMealsCsv("name,calories\napple,95");
   assertEquals(bad.ok, false);
   assertEquals(parseCsv('a,"b ""c""",d\n'), [["a", 'b "c"', "d"]]);
+});
+
+Deno.test("only edits that change words count", () => {
+  assertEquals(isMeaningfulEdit("2 eggs and toast", "2 Eggs, and toast!"), false);
+  assertEquals(isMeaningfulEdit("2 eggs and toast", "3 eggs and toast"), true);
+  assertEquals(isMeaningfulEdit("café au lait", "cafe au lait"), true);
 });

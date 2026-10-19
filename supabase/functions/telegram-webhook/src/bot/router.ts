@@ -6,16 +6,17 @@ import type { Message, Update } from "../telegram/types.ts";
 import { runCallback } from "./callbacks.ts";
 import { runCommand, runReplyKey } from "./commands.ts";
 import { createCtx, Ctx } from "./context.ts";
-import { respond } from "./assistant.ts";
+import { respond, respondToEdit } from "./assistant.ts";
 import { importCsv, isCsvFile } from "./screens/journal.ts";
 import { saveKey, stepView, welcomeView } from "./screens/onboarding.ts";
 
 export async function handleUpdate(update: Update) {
-  const chat = update.message?.chat ?? update.callback_query?.message?.chat ?? update.my_chat_member?.chat;
+  const chat = update.message?.chat ?? update.edited_message?.chat ?? update.callback_query?.message?.chat ??
+    update.my_chat_member?.chat;
   if (!chat) return;
   if (chat.type !== "private") return void await telegram.leave(chat.id);
 
-  const from = update.message?.from ?? update.callback_query?.from;
+  const from = update.message?.from ?? update.edited_message?.from ?? update.callback_query?.from;
   if (!from) return;
 
   const db = userDb(from.id);
@@ -37,6 +38,7 @@ export async function handleUpdate(update: Update) {
   try {
     if (cb) await runCallback(ctx, cb);
     else if (update.message) await routeMessage(ctx, update.message);
+    else if (update.edited_message) await routeEdit(ctx, update.edited_message);
   } catch (e) {
     console.error(e);
     if (cb) await telegram.answerCallback(cb.id, "Something went wrong").catch(() => {});
@@ -55,4 +57,11 @@ function routeMessage(ctx: Ctx, msg: Message) {
   // During setup, typed text would be ambiguous, so re-show the current step instead of passing it to the assistant.
   if (text && ctx.user.onboardingStep !== "done") return ctx.send(stepView(ctx));
   return respond(ctx, msg);
+}
+
+/** Only edits to messages the assistant could have handled are passed on; commands, keys and setup answers are not. */
+function routeEdit(ctx: Ctx, msg: Message) {
+  const text = (msg.text ?? msg.caption ?? "").trim();
+  if (ctx.user.onboardingStep !== "done" || !text || text.startsWith("/") || looksLikeKey(text)) return;
+  return respondToEdit(ctx, msg);
 }

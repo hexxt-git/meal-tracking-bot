@@ -8,6 +8,8 @@ export type Message = {
   message_id: number;
   /** Unix seconds when the user sent it. */
   date: number;
+  /** Unix seconds of the latest edit, on `edited_message` updates. */
+  edit_date?: number;
   from: From;
   chat: Chat;
   text?: string;
@@ -29,6 +31,7 @@ export type CallbackQuery = {
 export type Update = {
   update_id: number;
   message?: Message;
+  edited_message?: Message;
   callback_query?: CallbackQuery;
   my_chat_member?: { chat: Chat; from: From };
 };
