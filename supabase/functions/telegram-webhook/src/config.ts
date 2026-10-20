@@ -7,6 +7,8 @@ function env(name: string): string {
 export const config = {
   telegramToken: env("TELEGRAM_BOT_TOKEN"),
   webhookSecret: env("TELEGRAM_WEBHOOK_SECRET"),
+  /** Sent by the pg_cron job that triggers reminders; also stored in Vault as 'cron_secret'. */
+  cronSecret: env("CRON_SECRET"),
   databaseUrl: env("SUPABASE_DB_URL"),
   model: "google/gemini-3.8-flash",
   limits: {
@@ -26,6 +28,8 @@ export const config = {
     /** Once a run's billed cost passes this, research is refused; the run can still log and reply. */
     maxRunCostUsd: 0.04,
     maxResearchPerRun: 2,
+    /** Earlier messages (both sides, text only) given to the assistant, however old. */
+    historyMessages: 10,
     /** Rounds of multiple-choice questions allowed before the assistant must decide on its own. */
     maxQuestions: 2,
     /** A question left unanswered this long is dropped and the next message starts fresh. */

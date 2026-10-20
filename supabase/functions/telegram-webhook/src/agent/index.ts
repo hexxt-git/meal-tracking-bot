@@ -35,6 +35,8 @@ export type AgentInput = {
   fixMeal: Meal | null;
   answers: QuestionAnswer[];
   allowResearch: boolean;
+  /** Earlier messages, oldest first, not including this one. */
+  history: { role: "user" | "assistant"; text: string; attachments: string[]; at: Date }[];
   /** Set when the user edited an earlier message; `text` is then the edited version. */
   edit?: { before: string | null; sentAt: Date; meals: Meal[] };
   /** Receives one line per tool call and result, for logs. */
@@ -98,6 +100,12 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     canAsk,
     canResearch: research != null,
     hasPhotos: images.length > 0,
+    history: input.history.map((h) => ({
+      who: h.role === "user" ? "User" : "You",
+      at: localStamp(h.at, off),
+      text: h.text,
+      attachments: h.attachments,
+    })),
     edit: input.edit && {
       before: input.edit.before,
       after: input.text,

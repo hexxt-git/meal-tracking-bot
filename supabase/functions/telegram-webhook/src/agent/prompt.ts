@@ -17,7 +17,16 @@ export type PromptContext = {
   canResearch: boolean;
   hasPhotos: boolean;
   edit?: { before: string | null; after: string; sentAt: string; meals: unknown[] };
+  history: { who: "User" | "You"; at: string; text: string; attachments: string[] }[];
 };
+
+function transcript(history: PromptContext["history"]): string {
+  return history.map((h) => {
+    const extra = h.attachments.length ? ` [${h.attachments.join(", ")}]` : "";
+    const text = h.text.replace(/\s+/g, " ").trim().slice(0, 600);
+    return `[${h.at}] ${h.who}: ${text || "(no text)"}${extra}`;
+  }).join("\n");
+}
 
 export function systemPrompt(c: PromptContext): string {
   const research = c.canResearch
@@ -46,7 +55,9 @@ CONTEXT
 
 HOW TO WORK
 - Decide what the message is: new food (log_meal, one call per meal), a correction of a meal logged in the last ${EDIT_WINDOW_HOURS} h (update_meal with the complete new item list, or only eaten_at for a time change; delete_meal if it wasn't eaten or is a duplicate), a question about their log (read_meals covers ${READ_WINDOW_DAYS} days), or general conversation.
-- General questions about food, nutrition, cooking, ingredients or healthy habits: answer from your own knowledge, directly and accurately, without tools other than reply. Chit-chat is fine; keep it warm and brief, and steer back to food when it fits. Don't log anything unless the user says they ate it.
+- General questions about food, nutrition, cooking, ingredients or healthy habits: answer from your own knowledge, directly and accurately, without tools other than reply. Don't log anything unless the user says they ate it.
+- The message often continues the RECENT CONVERSATION below: "why?", "what about brown rice?", "and yesterday?", "make it 2" refer to what was just said. Resolve them from the conversation and answer or act on that, without asking what they mean when it's clear.
+- Be to the point, not chatty: no greetings, small talk, filler or follow-up offers. Match the length to the question.
 - "It"/"that" with nothing else to go on means the most recently logged meal. Meals logged over ${EDIT_WINDOW_HOURS} h ago are read-only.
 - Finish with reply. Call it in the same turn as your last change so the run ends in one step; every extra turn costs the user money.
 
@@ -65,6 +76,9 @@ MEAL TIME (eaten_at)
 REPLY TEXT
 - Plain text, English, no markdown. After logging or changing meals: at most 3 short sentences, no item list (the bot shows it); mention key assumptions, where numbers came from ("Soummam label", "research"), and how you read an ambiguous time.
 - Answers to questions or conversation: natural and conversational, usually 2 to 5 sentences; a short plain list is fine when it really helps. Give concrete numbers when you know them, and say when something is uncertain or individual (e.g. medical conditions: suggest asking a professional).
+
+RECENT CONVERSATION (oldest first; photos and voice notes are not included, only marked; your earlier replies are summarized with the meals they logged or changed):
+${c.history.length ? transcript(c.history) : "(none)"}
 
 MEALS LOGGED IN THE LAST ${EDIT_WINDOW_HOURS} H (most recent first): ${JSON.stringify(c.recentMeals)}${
     c.fixMeal ? `\n\nThe user tapped "Fix" on this meal, so the message is probably about it: ${JSON.stringify(c.fixMeal)}` : ""

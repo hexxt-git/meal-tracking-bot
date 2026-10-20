@@ -1,4 +1,5 @@
 import { config } from "./src/config.ts";
+import { sendReminders } from "./src/bot/reminders.ts";
 import { handleUpdate } from "./src/bot/router.ts";
 import { ping } from "./src/db/index.ts";
 import type { Update } from "./src/telegram/types.ts";
@@ -20,6 +21,11 @@ Deno.serve(async (req) => {
     return new Response("ok");
   }
   if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+
+  if (new URL(req.url).pathname.endsWith("/reminders")) {
+    if (!timingSafeEqual(req.headers.get("x-cron-secret") ?? "", config.cronSecret)) return new Response("unauthorized", { status: 401 });
+    return Response.json({ sent: await sendReminders() });
+  }
 
   // verify_jwt is off for this function, so this header is the only thing proving the caller is Telegram.
   const secret = req.headers.get("x-telegram-bot-api-secret-token") ?? "";

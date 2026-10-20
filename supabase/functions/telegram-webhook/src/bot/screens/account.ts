@@ -67,16 +67,25 @@ export async function settingsView(ctx: Ctx): Promise<View> {
       ["Units", cap(u.units)],
       ["Timezone", `${fmtOffset(u.utcOffsetMinutes)}  (now ${localTime(new Date(), u.utcOffsetMinutes).slice(11)})`],
       ["Country", countryName(u.country) ?? "Not set"],
+      ["Reminders", u.remindersEnabled ? "On" : "Off"],
       ["API key", hasKey ? "Saved" : "Not set"],
     ], ["l", "l"])}`,
     keyboard: [
       [btn(`Switch to ${other}`, `units:${other}`)],
       [btn("Change timezone", "tz:s:p:-1"), btn("Change country", "ct:s")],
+      [btn(u.remindersEnabled ? "Turn reminders off" : "Turn reminders on", `rem:${u.remindersEnabled ? "off" : "on"}`)],
       [btn(hasKey ? "Replace API key" : "Add API key", "key:new"), ...(hasKey ? [btn("Remove API key", "key:rm")] : [])],
       [btn("Delete account", "acct")],
       [btn("‹ Menu", "menu")],
     ],
   };
+}
+
+/** `rem:on` / `rem:off` */
+export async function setReminders(ctx: Ctx, [state]: string[]): Promise<Reply> {
+  if (state !== "on" && state !== "off") return {};
+  ctx.user = await ctx.db.users.update({ remindersEnabled: state === "on" });
+  return { view: await settingsView(ctx), toast: state === "on" ? "Reminders on" : "Reminders off" };
 }
 
 export async function setUnits(ctx: Ctx, [units]: string[]): Promise<Reply> {

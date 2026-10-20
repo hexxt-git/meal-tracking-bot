@@ -3,7 +3,17 @@ import { answerQuestion } from "./assistant.ts";
 import { countryAction } from "./screens/country.ts";
 import type { CallbackQuery } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
-import { accountAction, helpView, keyAction, menuView, profileView, settingsTimezone, settingsView, setUnits } from "./screens/account.ts";
+import {
+  accountAction,
+  helpView,
+  keyAction,
+  menuView,
+  profileView,
+  setReminders,
+  settingsTimezone,
+  settingsView,
+  setUnits,
+} from "./screens/account.ts";
 import { editGoal, goalsView, recalcGoals, saveGoal } from "./screens/goals.ts";
 import { dayView, deleteMeal, exportCsv, historyView, importHelpView, mealView, undo, weekView } from "./screens/journal.ts";
 import { onboardingAction, startProfile, stepView } from "./screens/onboarding.ts";
@@ -36,6 +46,7 @@ const HANDLERS: Record<string, Handler> = {
 
   set: async (ctx) => ({ view: await settingsView(ctx) }),
   units: setUnits,
+  rem: setReminders,
   key: keyAction,
   acct: accountAction,
   tz: (ctx, [mode, ...rest]) => {

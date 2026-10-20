@@ -19,7 +19,7 @@ export async function respond(ctx: Ctx, msg: Message) {
   const input = await collectInput(ctx, msg);
   if (!input) return;
   if (!input.text && !input.photoIds.length && !input.audio) return ctx.send(LOG_HINT);
-  await ctx.db.messages.remember(input.messageId, input.text, new Date(input.sentAt));
+  await ctx.db.messages.remember(input.messageId, input.text, new Date(input.sentAt), attachments(input));
 
   const q = ctx.user.pendingQuestion;
   if (isOpen(q, Date.now(), config.agent.questionTtlMs) && input.text && !input.photoIds.length && !input.audio) {
@@ -136,6 +136,7 @@ async function run(ctx: Ctx, input: ChatInput, answers: QuestionAnswer[], fixMea
       answers,
       allowResearch: spent < config.budget.researchCutoffUsd,
       edit,
+      history: await chatHistory(ctx, input.messageId),
       trace: (line) => console.log(`[agent ${ctx.user.tgId}] ${line}`),
     });
   } finally {
@@ -159,12 +160,39 @@ async function run(ctx: Ctx, input: ChatInput, answers: QuestionAnswer[], fixMea
       fixMealId,
     };
     ctx.user = await ctx.db.users.update({ pendingQuestion: q });
-    return ctx.send({
+    const sent = await ctx.send({
       text: `${esc(q.question)}\n\n<i>Tap an answer or type your own.</i>`,
       keyboard: rows(q.options.map((o, i) => btn(o, `ask:${q.id}:${i}`)), 2),
     });
+    return rememberReply(ctx, sent, `Asked: ${q.question} (options: ${q.options.join(" / ")})`);
   }
-  return ctx.send(await resultView(ctx, result));
+  const sent = await ctx.send(await resultView(ctx, result));
+  return rememberReply(ctx, sent, replySummary(result));
+}
+
+function attachments(input: ChatInput): string[] {
+  return [...input.photoIds.map(() => "photo"), ...(input.audio ? ["voice note"] : [])];
+}
+
+async function chatHistory(ctx: Ctx, currentMessageId: number) {
+  const rows = await ctx.db.messages.recent(config.agent.historyMessages, currentMessageId);
+  return rows.map((m) => ({ role: m.role, text: m.text, attachments: m.attachments, at: m.sentAt }));
+}
+
+/** What the assistant said and did, as it will read it back in later runs. */
+function replySummary(r: AgentResult): string {
+  const lines = r.changes.map((c) => {
+    const verb = c.kind === "created" ? "Logged" : c.kind === "updated" ? "Updated" : "Deleted";
+    return c.kind === "deleted" ? `${verb} "${c.meal.description}".` : `${verb} "${c.meal.description}" (${c.meal.kcal} kcal).`;
+  });
+  if (r.error) lines.push(`(OpenRouter error: ${r.error.message})`);
+  else if (r.reply) lines.push(r.reply);
+  return lines.join(" ");
+}
+
+async function rememberReply(ctx: Ctx, sent: unknown, summary: string) {
+  const id = (sent as { message_id?: number } | null)?.message_id;
+  if (id && summary) await ctx.db.messages.rememberReply(id, summary);
 }
 
 async function resultView(ctx: Ctx, r: AgentResult): Promise<View> {

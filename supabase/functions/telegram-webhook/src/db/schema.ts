@@ -32,6 +32,8 @@ export const users = app.table("users", {
   targetCarbsG: integer("target_carbs_g"),
   targetFatG: integer("target_fat_g"),
   fixMealId: uuid("fix_meal_id"),
+  remindersEnabled: boolean("reminders_enabled").notNull().default(true),
+  lastReminderAt: tstz("last_reminder_at"),
   pendingQuestion: jsonb("pending_question").$type<PendingQuestion>(),
   createdAt: tstz("created_at").notNull().defaultNow(),
   updatedAt: tstz("updated_at").notNull().defaultNow(),
@@ -95,8 +97,13 @@ export const chatMessages = app.table("chat_messages", {
   text: text("text").notNull().default(""),
   sentAt: tstz("sent_at").notNull(),
   batchIds: uuid("batch_ids").array().notNull().default([]),
+  role: text("role").$type<"user" | "assistant">().notNull().default("user"),
+  /** e.g. "photo", "voice note": what the message carried besides text. */
+  attachments: text("attachments").array().notNull().default([]),
   createdAt: tstz("created_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.tgId, t.messageId] })]);
+
+export type ChatMessage = typeof chatMessages.$inferSelect;
 
 export type User = typeof users.$inferSelect;
 export type UserPatch = Partial<Omit<typeof users.$inferInsert, "tgId" | "createdAt" | "updatedAt">>;

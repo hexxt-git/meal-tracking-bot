@@ -7,7 +7,7 @@ import * as schema from "./schema.ts";
 // Transaction-mode pooler: no prepared statements.
 const client = postgres(config.databaseUrl, { prepare: false, max: 3 });
 
-// Not exported: this connection bypasses RLS. All access goes through `userRunner`.
+// Not exported: this connection bypasses RLS. Access goes through `userRunner`, or `systemRunner` for cross-user jobs.
 const db = drizzle(client, { schema });
 
 export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -22,6 +22,9 @@ export function userRunner(tgId: number): Run {
       return await fn(tx);
     });
 }
+
+/** Plain transactions as `postgres`, which bypasses RLS. Only for jobs that span users (see `systemDb`). */
+export const systemRunner: Run = (fn) => db.transaction(fn);
 
 /** Runs a trivial real query so Supabase sees database activity (free projects pause when idle). */
 export async function ping(): Promise<void> {

@@ -24,6 +24,8 @@ their own API key, within a daily budget of $0.10.
      online (a readable label in the photo counts), preferring products sold in your country.
    - **Questions**: when an unknown would swing the estimate a lot (how much of a shared bag you ate, say), it asks
      one multiple-choice question as buttons. Tap an answer or type one. At most two rounds per message.
+   - **Conversation**: the assistant sees the last 10 messages from both sides (text only, photos marked), so
+     follow-ups like "why?" or "what about brown rice?" work.
    - **Edits**: editing a sent message re-runs the assistant with the before and after text and the meals that message
      logged or changed, so "2 eggs" edited to "3 eggs" updates the meal. Edits that only change case, punctuation or
      spacing are ignored.
@@ -35,7 +37,9 @@ their own API key, within a daily budget of $0.10.
    - **History**: older meals, page by page.
    - **Meal**: item table, with Delete and Undo.
    - **Goals**: steppers per value, or recalculate from your profile.
-   - **Profile**, **Settings** (units, timezone, country, API key, delete account).
+   - **Profile**, **Settings** (units, timezone, country, reminders, API key, delete account).
+5. **Reminders**: after 12, 18, 24 and 48 hours without a logged meal the bot sends a short reminder, once each. Logging
+   any meal restarts the timer. They can be turned off in Settings.
    - **Export CSV** / **Import CSV**: send back a file in the export format to import it. Meals already in the log are
      skipped and the import can be undone.
 
@@ -144,7 +148,7 @@ stop at $0.10 until midnight UTC. Daily totals are stored in `app.ai_usage`.
 | `meal_revisions` | snapshot before each create/edit/delete, grouped by `batch_id`, for Undo (kept 30 days) |
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
 | `rate_limits` | per-user fixed-window counters (kept 2 days) |
-| `chat_messages` | text of each message sent to the assistant and the undo batches its reply created, for edits (kept 3 days) |
+| `chat_messages` | your messages and summaries of the assistant's replies: conversation context and edit handling (newest 10 per user kept, older rows trimmed after 3 days) |
 | `ai_usage` | billed OpenRouter cost, runs and research lookups per user per UTC day |
 | `media_group_items` | album photos waiting to be processed together (kept 1 day) |
 
@@ -155,7 +159,7 @@ Photos aren't stored; only Telegram `file_id`s are kept.
 | File | Used by | Contents |
 |---|---|---|
 | `.env` (from `.env.example`) | your machine: CLI, `setup:bot` | project ref, DB password, bot token, webhook secret |
-| `supabase/.env` (from `supabase/.env.example`) | `secrets:set` → function env | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` |
+| `supabase/.env` (from `supabase/.env.example`) | `secrets:set` → function env | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET` |
 
 `SUPABASE_DB_URL` is provided to the function by Supabase automatically. Both `.env` files are git-ignored.
 
@@ -167,6 +171,8 @@ bunx supabase login
 bunx supabase link --project-ref <ref>
 cp .env.example .env && cp supabase/.env.example supabase/.env      # fill in; secret: openssl rand -hex 32
 bun run secrets:set
+# store the same CRON_SECRET in Vault for the reminders job (SQL editor):
+#   select vault.create_secret('<CRON_SECRET>', 'cron_secret');
 bun run db:push
 bun run deploy
 bun run setup:bot
@@ -191,6 +197,9 @@ bun run deploy   # redeploy the function
 - **Health**: `GET /functions/v1/telegram-webhook/health` runs a real query and returns `ok`.
 - **Keepalive**: free projects pause after about a week without database activity. cron-job.org hits `/health` every
   hour, and a `pg_cron` job (`keepalive`) does the same every 6 hours as a backup.
+- **Reminders**: the `reminders` pg_cron job POSTs to `/functions/v1/telegram-webhook/reminders` every 15 minutes with
+  an `x-cron-secret` header read from Vault (`cron_secret`); the function compares it with its `CRON_SECRET`. The
+  scan runs as `postgres` (no RLS) through `systemDb()`, which only exposes the reminder queries.
 - **Cleanup**: the `app-cleanup` cron job runs nightly at 03:17 UTC and trims the bookkeeping tables listed above.
 - **Free tier**: 500 MB database and 500k function invocations a month. One user logging 10 meals a day uses about
   300 invocations a month.

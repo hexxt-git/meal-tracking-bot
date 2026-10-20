@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { systemPrompt } from "../src/agent/prompt.ts";
 import { RunState } from "../src/agent/tools.ts";
 import type { Meal } from "../src/db/index.ts";
 import { COUNTRY_LETTERS, countriesByLetter, countryName } from "../src/domain/countries.ts";
@@ -77,4 +78,23 @@ Deno.test("only edits that change words count", () => {
   assertEquals(isMeaningfulEdit("2 eggs and toast", "2 Eggs, and toast!"), false);
   assertEquals(isMeaningfulEdit("2 eggs and toast", "3 eggs and toast"), true);
   assertEquals(isMeaningfulEdit("café au lait", "cafe au lait"), true);
+});
+
+Deno.test("prompt carries the recent conversation, oldest first, with attachments marked", () => {
+  const prompt = systemPrompt({
+    now: "Mon 2026-10-19 20:00", nowIso: "2026-10-19T20:00:00+01:00", offset: "+01:00", country: "Algeria", units: "metric",
+    targets: null, recentMeals: [], fixMeal: null, answers: [], canAsk: true, canResearch: true, hasPhotos: false,
+    history: [
+      { who: "User", at: "Mon 2026-10-19 19:58", text: "is white rice\nok before the gym?", attachments: [] },
+      { who: "You", at: "Mon 2026-10-19 19:58", text: "Yes, it digests fast.", attachments: [] },
+      { who: "User", at: "Mon 2026-10-19 19:59", text: "", attachments: ["photo"] },
+    ],
+  });
+  const block = prompt.slice(prompt.indexOf("RECENT CONVERSATION ("));
+  const lines = block.split("\n").slice(1, 4);
+  assertEquals(lines, [
+    "[Mon 2026-10-19 19:58] User: is white rice ok before the gym?",
+    "[Mon 2026-10-19 19:58] You: Yes, it digests fast.",
+    "[Mon 2026-10-19 19:59] User: (no text) [photo]",
+  ]);
 });
