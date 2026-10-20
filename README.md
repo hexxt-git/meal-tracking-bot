@@ -149,6 +149,7 @@ stop at $0.10 until midnight UTC. Daily totals are stored in `app.ai_usage`.
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
 | `rate_limits` | per-user fixed-window counters (kept 2 days) |
 | `chat_messages` | your messages and summaries of the assistant's replies: conversation context and edit handling (newest 10 per user kept, older rows trimmed after 3 days) |
+| `config` | deployment settings that aren't secret, read by the cron jobs (`functions_url`); no access for the bot's role |
 | `ai_usage` | billed OpenRouter cost, runs and research lookups per user per UTC day |
 | `media_group_items` | album photos waiting to be processed together (kept 1 day) |
 
@@ -171,11 +172,17 @@ bunx supabase login
 bunx supabase link --project-ref <ref>
 cp .env.example .env && cp supabase/.env.example supabase/.env      # fill in; secret: openssl rand -hex 32
 bun run secrets:set
-# store the same CRON_SECRET in Vault for the reminders job (SQL editor):
-#   select vault.create_secret('<CRON_SECRET>', 'cron_secret');
 bun run db:push
 bun run deploy
 bun run setup:bot
+```
+
+Then, in the SQL editor, point the cron jobs (keepalive and reminders) at your project and give them the
+reminders secret. Until `functions_url` is set, both jobs do nothing.
+
+```sql
+insert into app.config (key, value) values ('functions_url', 'https://<ref>.supabase.co/functions/v1');
+select vault.create_secret('<CRON_SECRET from supabase/.env>', 'cron_secret');
 ```
 
 If your network blocks Postgres ports (5432/6543), `db:push` can't connect. Run each migration through the Management
@@ -197,7 +204,7 @@ bun run deploy   # redeploy the function
 - **Health**: `GET /functions/v1/telegram-webhook/health` runs a real query and returns `ok`.
 - **Keepalive**: free projects pause after about a week without database activity. cron-job.org hits `/health` every
   hour, and a `pg_cron` job (`keepalive`) does the same every 6 hours as a backup.
-- **Reminders**: the `reminders` pg_cron job POSTs to `/functions/v1/telegram-webhook/reminders` every 15 minutes with
+- **Reminders**: the `reminders` pg_cron job POSTs to `<functions_url>/telegram-webhook/reminders` every 15 minutes with
   an `x-cron-secret` header read from Vault (`cron_secret`); the function compares it with its `CRON_SECRET`. The
   scan runs as `postgres` (no RLS) through `systemDb()`, which only exposes the reminder queries.
 - **Cleanup**: the `app-cleanup` cron job runs nightly at 03:17 UTC and trims the bookkeeping tables listed above.
