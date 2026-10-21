@@ -1,5 +1,5 @@
 import { esc, telegram } from "../telegram/api.ts";
-import { answerQuestion } from "./assistant.ts";
+import { answerQuestion, continuePastBudget, retry } from "./assistant.ts";
 import { countryAction } from "./screens/country.ts";
 import type { CallbackQuery } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
@@ -57,6 +57,8 @@ const HANDLERS: Record<string, Handler> = {
   ct: countryAction,
 
   ask: answerQuestion,
+  retry,
+  budget: continuePastBudget,
 
   /** Only points the assistant at the meal; what to change is up to the user's next message and the assistant. */
   async fix(ctx, [id]) {

@@ -7,6 +7,7 @@ import { parseCsv, parseMealsCsv, toCsv } from "../src/domain/csv.ts";
 import { isEditable } from "../src/domain/meal.ts";
 import { nextStep, parseChoice, PROFILE_STEPS } from "../src/domain/onboarding.ts";
 import { isMeaningfulEdit } from "../src/domain/question.ts";
+import { parseProviderError } from "../src/services/openrouter-error.ts";
 
 const meal = (id: string, kcal: number): Meal => ({
   id, tgId: 1, eatenAt: new Date(0), loggedAt: new Date(0), description: id, userNote: null, items: [], kcal,
@@ -97,4 +98,14 @@ Deno.test("prompt carries the recent conversation, oldest first, with attachment
     "[Mon 2026-10-19 19:58] You: Yes, it digests fast.",
     "[Mon 2026-10-19 19:59] User: (no text) [photo]",
   ]);
+});
+
+Deno.test("provider errors worth retrying", () => {
+  const transient = (m: string) => parseProviderError(m).transient;
+  assertEquals(transient("The operation was aborted"), true);
+  assertEquals(transient('502: {"message":"Provider returned error"}'), true);
+  assertEquals(transient('429: {"message":"Rate limited"}'), true);
+  assertEquals(transient('403: {"message":"Key limit exceeded (daily limit)"}'), false);
+  assertEquals(transient('401: {"message":"User not found"}'), false);
+  assertEquals(parseProviderError('403: {"message":"Key limit exceeded (daily limit)"}').message, "Key limit exceeded (daily limit)");
 });

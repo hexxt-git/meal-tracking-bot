@@ -23,6 +23,18 @@ export type PendingQuestion = {
   fixMealId: string | null;
 };
 
+/** One run of the assistant on a message, kept so it can be started again. */
+export type Job = {
+  input: ChatInput;
+  answers: QuestionAnswer[];
+  fixMealId: string | null;
+  /** Set for an edited message; the meals that message touched are looked up when the job runs. */
+  edit: { before: string | null; sentAt: string } | null;
+};
+
+/** A job that failed or was stopped by the daily budget, behind a Retry or Continue button with this id. */
+export type SavedRun = Job & { id: string };
+
 export const isOpen = (q: PendingQuestion | null, now: number, ttlMs: number): q is PendingQuestion =>
   q != null && now - Date.parse(q.askedAt) < ttlMs;
 

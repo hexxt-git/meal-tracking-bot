@@ -27,6 +27,8 @@ export const config = {
     timeoutMs: 90_000,
     /** Once a run's billed cost passes this, research is refused; the run can still log and reply. */
     maxRunCostUsd: 0.04,
+    /** Requests whose stream fails with a transient error (dropped connection, 5xx, 429) are re-sent this many times. */
+    transientRetries: 1,
     maxResearchPerRun: 2,
     /** Earlier messages (both sides, text only) given to the assistant, however old. */
     historyMessages: 10,
@@ -44,9 +46,9 @@ export const config = {
   },
   /** Per user per UTC day, in billed OpenRouter USD. */
   budget: {
-    dailyUsd: 0.1,
+    dailyUsd: 0.2,
     /** Above this, research is switched off for the rest of the day so logging stays within the budget. */
-    researchCutoffUsd: 0.06,
+    researchCutoffUsd: 0.12,
   },
   albumSettleMs: 2500,
 } as const;

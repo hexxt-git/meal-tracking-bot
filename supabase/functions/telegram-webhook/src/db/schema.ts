@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { bigint, boolean, date, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import type { MealItem } from "../domain/meal.ts";
 import type { Step, Units } from "../domain/onboarding.ts";
-import type { PendingQuestion } from "../domain/question.ts";
+import type { PendingQuestion, SavedRun } from "../domain/question.ts";
 import type { Activity, Objective, Sex } from "../domain/nutrition.ts";
 
 const app = pgSchema("app");
@@ -35,6 +35,7 @@ export const users = app.table("users", {
   remindersEnabled: boolean("reminders_enabled").notNull().default(true),
   lastReminderAt: tstz("last_reminder_at"),
   pendingQuestion: jsonb("pending_question").$type<PendingQuestion>(),
+  retryRun: jsonb("retry_run").$type<SavedRun>(),
   createdAt: tstz("created_at").notNull().defaultNow(),
   updatedAt: tstz("updated_at").notNull().defaultNow(),
 });
@@ -89,6 +90,7 @@ export const aiUsage = app.table("ai_usage", {
   costUsd: decimal("cost_usd").notNull().default(0),
   runs: integer("runs").notNull().default(0),
   searches: integer("searches").notNull().default(0),
+  budgetBypassed: boolean("budget_bypassed").notNull().default(false),
 }, (t) => [primaryKey({ columns: [t.tgId, t.day] })]);
 
 export const chatMessages = app.table("chat_messages", {

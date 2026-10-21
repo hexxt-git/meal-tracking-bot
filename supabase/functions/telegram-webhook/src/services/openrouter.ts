@@ -2,16 +2,13 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { createModels } from "@earendil-works/pi-ai";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import { config } from "../config.ts";
+import { OpenRouterError } from "./openrouter-error.ts";
+
+export { OpenRouterError, parseProviderError } from "./openrouter-error.ts";
 
 const ENDPOINT = "https://openrouter.ai/api/v1";
 
 export type Media = { kind: "image"; mime: string; data: Uint8Array } | { kind: "audio"; format: string; data: Uint8Array };
-
-export class OpenRouterError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
 
 const models = createModels();
 models.setProvider(openrouterProvider());
@@ -54,6 +51,9 @@ export function openRouterStream(
       ...options,
       apiKey,
       headers: { ...options?.headers, "x-title": "Meal Tracker" },
+      // Retries failures before streaming starts; a stream cut off midway is retried by the agent.
+      maxRetries: 2,
+      maxRetryDelayMs: 10_000,
       onPayload: (raw) => {
         const payload = raw as Payload;
         payload.reasoning = { effort: requests++ === 0 ? config.agent.firstEffort : config.agent.followUpEffort };
@@ -104,17 +104,6 @@ export async function researchFood(apiKey: string, query: string, country: strin
   const message = body.choices?.[0]?.message ?? {};
   const sources = (message.annotations ?? []).flatMap((a: { url_citation?: { url?: string } }) => (a.url_citation?.url ? [a.url_citation.url] : []));
   return { answer: String(message.content ?? "").trim(), sources, costUsd: body.usage?.cost ?? 0, generationId: body.id ?? null };
-}
-
-/** pi reports provider failures as "<status>: <body>". */
-export function parseProviderError(message: string): OpenRouterError {
-  const status = Number(message.match(/^(\d{3})\b/)?.[1] ?? 0);
-  const detail = message.replace(/^\d{3}:\s*/, "");
-  try {
-    return new OpenRouterError(status, JSON.parse(detail).message ?? detail);
-  } catch {
-    return new OpenRouterError(status, detail);
-  }
 }
 
 export async function isValidKey(apiKey: string): Promise<boolean> {

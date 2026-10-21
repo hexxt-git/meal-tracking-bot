@@ -6,7 +6,7 @@ estimates calories and macros, and tracks them against personal daily goals.
 It runs entirely on Supabase, with one Edge Function plus Postgres and no other server. Messages are handled by a
 tool-calling agent ([pi](https://github.com/earendil-works/pi) agent loop) on `google/gemini-3.8-flash` (minimal
 reasoning effort) through OpenRouter. It can research food on the web, and each user pays for their own usage with
-their own API key, within a daily budget of $0.10.
+their own API key, within a daily budget of $0.20.
 
 ## Using the bot
 
@@ -121,8 +121,16 @@ $0.0055 at minimal, with similar estimates. Google's native search through OpenR
 so research uses Exa instead. Products already logged in the last day are reused instead of researched again.
 
 A typical day of 7 meal photos, 2 new branded products and a correction comes to about $0.08. Two guards keep
-every user under `config.budget.dailyUsd` ($0.10): research is switched off once the day passes $0.06, and requests
-stop at $0.10 until midnight UTC. Daily totals are stored in `app.ai_usage`.
+every user under `config.budget.dailyUsd` ($0.20): research is switched off once the day passes $0.12, and requests
+stop at $0.20 until midnight UTC. The stop message has a Continue anyway button that lifts both guards for the rest of
+that UTC day. Daily totals are stored in `app.ai_usage`.
+
+## Errors
+
+A request that fails before streaming starts with a dropped connection, 408, 409, 429 or 5xx is retried twice by pi;
+a stream that breaks midway is re-sent once by the agent. If it still fails, or times out, before any meal was changed,
+the error message gets a Retry button that runs the same message again (kept in `users.retry_run`). Key problems
+(401, 402, a key spending limit set on OpenRouter) get their own explanation and no Retry.
 
 ## Security model
 
@@ -143,14 +151,14 @@ stop at $0.10 until midnight UTC. Daily totals are stored in `app.ai_usage`.
 
 | Table | Purpose |
 |---|---|
-| `users` | Telegram id, chat id, setup step, profile, timezone offset, country, daily goals, Fix target, open question |
+| `users` | Telegram id, chat id, setup step, profile, timezone offset, country, daily goals, Fix target, open question, last failed request |
 | `meals` | `eaten_at` (when it was eaten, settable by the AI), `logged_at` (when the message was sent), title, AI item breakdown (JSON), totals, Telegram photo file ids, the user's text |
 | `meal_revisions` | snapshot before each create/edit/delete, grouped by `batch_id`, for Undo (kept 30 days) |
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
 | `rate_limits` | per-user fixed-window counters (kept 2 days) |
 | `chat_messages` | your messages and summaries of the assistant's replies: conversation context and edit handling (newest 10 per user kept, older rows trimmed after 3 days) |
 | `config` | deployment settings that aren't secret, read by the cron jobs (`functions_url`); no access for the bot's role |
-| `ai_usage` | billed OpenRouter cost, runs and research lookups per user per UTC day |
+| `ai_usage` | billed OpenRouter cost, runs and research lookups per user per UTC day, and whether the budget was lifted |
 | `media_group_items` | album photos waiting to be processed together (kept 1 day) |
 
 Photos aren't stored; only Telegram `file_id`s are kept.
@@ -210,6 +218,6 @@ bun run deploy   # redeploy the function
 - **Cleanup**: the `app-cleanup` cron job runs nightly at 03:17 UTC and trims the bookkeeping tables listed above.
 - **Free tier**: 500 MB database and 500k function invocations a month. One user logging 10 meals a day uses about
   300 invocations a month.
-- **AI cost**: paid by each user on OpenRouter, capped at $0.10 a day per user (see [Cost](#cost)).
+- **AI cost**: paid by each user on OpenRouter, capped at $0.20 a day per user unless they lift it (see [Cost](#cost)).
 - **Logs**: `GET /v1/projects/<ref>/analytics/endpoints/logs` with
   `sql=select timestamp, event_message from logs where source = 'function_logs' order by timestamp desc limit 50`.

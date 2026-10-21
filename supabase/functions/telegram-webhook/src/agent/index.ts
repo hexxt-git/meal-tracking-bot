@@ -159,6 +159,13 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   }, config.agent.timeoutMs);
   try {
     await agent.prompt(input.edit ? `(edited message) ${input.text}` : input.text || "(no text)", images);
+    for (let retry = 0; retry < config.agent.transientRetries && !timedOut; retry++) {
+      const failed = agent.state.messages.at(-1);
+      if (!agent.state.errorMessage || failed?.role !== "assistant" || !parseProviderError(agent.state.errorMessage).transient) break;
+      input.trace?.(`retrying after: ${agent.state.errorMessage.slice(0, 200)}`);
+      agent.state.messages = agent.state.messages.slice(0, -1);
+      await agent.continue();
+    }
   } finally {
     clearTimeout(timer);
   }
