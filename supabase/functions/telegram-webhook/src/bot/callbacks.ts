@@ -28,6 +28,8 @@ const HANDLERS: Record<string, Handler> = {
   menu: () => ({ view: menuView() }),
   help: () => ({ view: helpView() }),
   day: async (ctx, [n]) => ({ view: await dayView(ctx, int(n)) }),
+  /** From a meal reply: today's totals as a new message, leaving the reply as it is. */
+  today: async (ctx) => ({ send: await dayView(ctx, 0) }),
   week: async (ctx) => ({ view: await weekView(ctx) }),
   hist: async (ctx, [page]) => ({ view: await historyView(ctx, int(page)) }),
   meal: async (ctx, [id, origin]) => ({ view: await mealView(ctx, id, origin) }),

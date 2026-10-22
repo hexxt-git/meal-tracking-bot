@@ -107,7 +107,7 @@ export async function undo(ctx: Ctx, batchId: string, origin: Origin | undefined
     : [...outcome.values()].map((r) =>
       r.restored ? `Restored <b>${esc(r.description)}</b> to its previous version.` : `Removed <b>${esc(r.description)}</b>.`
     );
-  return { view: { text: lines.join("\n"), keyboard: [[btn("Today", "day:0")]] } };
+  return { view: { text: lines.join("\n"), keyboard: [[btn("Today", "today")]] } };
 }
 
 export async function exportCsv(ctx: Ctx): Promise<Reply> {

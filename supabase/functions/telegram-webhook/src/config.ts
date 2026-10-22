@@ -30,6 +30,8 @@ export const config = {
     /** Requests whose stream fails with a transient error (dropped connection, 5xx, 429) are re-sent this many times. */
     transientRetries: 1,
     maxResearchPerRun: 2,
+    /** view_image calls per message; each sends one photo to the model again (about $0.001). */
+    maxImageViews: 3,
     /** Earlier messages (both sides, text only) given to the assistant, however old. */
     historyMessages: 10,
     /** Rounds of multiple-choice questions allowed before the assistant must decide on its own. */

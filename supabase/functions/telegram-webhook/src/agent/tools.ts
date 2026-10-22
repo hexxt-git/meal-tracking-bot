@@ -12,6 +12,32 @@ export type Change = { kind: "created" | "updated" | "deleted"; meal: Meal; befo
 /** Web lookup used by `research_food`; returns a short answer and what it cost. */
 export type ResearchFn = (query: string) => Promise<{ answer: string; sources: string[]; costUsd: number }>;
 
+/** Photos the user sent earlier, by the short ids the assistant sees. */
+export type PhotoLibrary = {
+  /** Ids by Telegram file id; files without one are left out. */
+  idsFor: (fileIds: string[]) => Promise<Map<string, string>>;
+  load: (photoId: string) => Promise<ImageContent | null>;
+};
+
+export type RunOptions = {
+  store: MealStore;
+  offsetMin: number;
+  sentAt: Date;
+  userText: string | null;
+  /** Telegram file ids of this message's photos, saved on the meals it logs. */
+  fileIds: string[];
+  messageId: number;
+  /** This message's photos with their ids, in the same order as `fileIds`. */
+  photos?: { id: string; image: ImageContent }[];
+  library?: PhotoLibrary;
+  maxImageViews?: number;
+  /** Null when research is unavailable (not configured, or today's budget is nearly used). */
+  research?: ResearchFn | null;
+  maxResearch?: number;
+  /** True once the run has spent its cost cap. */
+  overBudget?: () => boolean;
+};
+
 /** Everything the tools act on during one assistant run. */
 export class RunState {
   readonly batchId = crypto.randomUUID();
@@ -20,21 +46,14 @@ export class RunState {
   replyText: string | null = null;
   researches = 0;
   researchCostUsd = 0;
+  imageViews = 0;
+  private readonly photoIds = new Map<string, string>();
 
-  constructor(
-    readonly store: MealStore,
-    readonly offsetMin: number,
-    readonly sentAt: Date,
-    readonly userText: string | null,
-    readonly photoIds: string[],
-    readonly messageId: number,
-    readonly photos: ImageContent[] = [],
-    /** Null when research is unavailable (not configured, or today's budget is nearly used). */
-    readonly research: ResearchFn | null = null,
-    readonly maxResearch = 0,
-    /** True once the run has spent its cost cap. */
-    readonly overBudget: () => boolean = () => false,
-  ) {}
+  constructor(readonly o: RunOptions) {
+    o.photos?.forEach((p, i) => {
+      if (o.fileIds[i]) this.photoIds.set(o.fileIds[i], p.id);
+    });
+  }
 
   /** Folds successive changes to one meal into its net effect for this run. */
   record(kind: Change["kind"], meal: Meal, before?: Meal) {
@@ -47,20 +66,32 @@ export class RunState {
     this.changes.set(meal.id, { kind, meal, before: prev.before });
   }
 
-  /** A meal as the model sees it: local times and an editable flag. */
-  view(m: Meal) {
-    return {
-      id: m.id,
-      eaten_at: localStamp(m.eatenAt, this.offsetMin),
-      logged_at: localStamp(m.loggedAt, this.offsetMin),
-      editable: isEditable(m.loggedAt, Date.now()),
-      description: m.description,
-      kcal: m.kcal,
-      protein_g: m.proteinG,
-      carbs_g: m.carbsG,
-      fat_g: m.fatG,
-      items: m.items,
-    };
+  /** Meals as the model sees them: local times, an editable flag and the ids of their photos. */
+  async views(meals: Meal[]) {
+    const unknown = meals.flatMap((m) => m.photoFileIds).filter((f) => !this.photoIds.has(f));
+    if (unknown.length && this.o.library) {
+      for (const [fileId, id] of await this.o.library.idsFor([...new Set(unknown)])) this.photoIds.set(fileId, id);
+    }
+    return meals.map((m) => {
+      const photos = m.photoFileIds.flatMap((f) => this.photoIds.get(f) ?? []);
+      return {
+        id: m.id,
+        eaten_at: localStamp(m.eatenAt, this.o.offsetMin),
+        logged_at: localStamp(m.loggedAt, this.o.offsetMin),
+        editable: isEditable(m.loggedAt, Date.now()),
+        description: m.description,
+        kcal: m.kcal,
+        protein_g: m.proteinG,
+        carbs_g: m.carbsG,
+        fat_g: m.fatG,
+        items: m.items,
+        ...(photos.length ? { photos } : {}),
+      };
+    });
+  }
+
+  async view(m: Meal) {
+    return (await this.views([m]))[0];
   }
 }
 
@@ -86,13 +117,13 @@ const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.s
 
 function eatenAt(s: string | undefined, run: RunState): Date | undefined {
   if (s === undefined) return undefined;
-  const d = parseEatenAt(s, run.sentAt.getTime(), READ_WINDOW_DAYS);
+  const d = parseEatenAt(s, run.o.sentAt.getTime(), READ_WINDOW_DAYS);
   if (!d) throw new Error(`eaten_at must be ISO 8601, not in the future and at most ${READ_WINDOW_DAYS} days back`);
   return d;
 }
 
 async function editableMeal(run: RunState, id: string): Promise<Meal> {
-  const meal = UUID.test(id) ? await run.store.byId(id) : null;
+  const meal = UUID.test(id) ? await run.o.store.byId(id) : null;
   if (!meal) throw new Error(`No meal with id ${id}`);
   if (!isEditable(meal.loggedAt, Date.now())) throw new Error("This meal was logged more than 24 hours ago and is read-only");
   return meal;
@@ -119,8 +150,8 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
       parameters: Type.Object({ days_back: Type.Integer({ minimum: 0, maximum: READ_WINDOW_DAYS - 1 }) }),
       execute: async (_id, p) => {
         const days = Math.min(READ_WINDOW_DAYS - 1, Math.max(0, p.days_back));
-        const meals = await run.store.since(dayStart(run.offsetMin, days));
-        return ok(meals.map((m) => run.view(m)));
+        const meals = await run.o.store.since(dayStart(run.o.offsetMin, days));
+        return ok(await run.views(meals));
       },
     }),
     tool({
@@ -134,18 +165,18 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
       }),
       execute: async (_id, p) => {
         const items = cleanItems(p.items);
-        const { meal } = await run.store.create({
-          eatenAt: eatenAt(p.eaten_at, run) ?? run.sentAt,
-          loggedAt: run.sentAt,
+        const { meal } = await run.o.store.create({
+          eatenAt: eatenAt(p.eaten_at, run) ?? run.o.sentAt,
+          loggedAt: run.o.sentAt,
           description: p.description.trim() || "Meal",
-          userNote: run.userText,
+          userNote: run.o.userText,
           items,
           ...itemTotals(items),
-          photoFileIds: run.photoIds,
-          sourceMessageId: run.messageId,
+          photoFileIds: run.o.fileIds,
+          sourceMessageId: run.o.messageId,
         }, run.batchId);
         run.record("created", meal);
-        return ok(run.view(meal));
+        return ok(await run.view(meal));
       },
     }),
     tool({
@@ -161,16 +192,16 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
       execute: async (_id, p) => {
         const meal = await editableMeal(run, p.meal_id);
         const items = p.items && cleanItems(p.items);
-        const result = await run.store.update(meal.id, {
+        const result = await run.o.store.update(meal.id, {
           ...(p.description?.trim() ? { description: p.description.trim() } : {}),
           ...(p.eaten_at !== undefined ? { eatenAt: eatenAt(p.eaten_at, run) } : {}),
           ...(items ? { items, ...itemTotals(items) } : {}),
-          ...(run.photoIds.length ? { photoFileIds: [...meal.photoFileIds, ...run.photoIds] } : {}),
-          ...(run.userText ? { userNote: [meal.userNote, run.userText].filter(Boolean).join("\n") } : {}),
+          ...(run.o.fileIds.length ? { photoFileIds: [...new Set([...meal.photoFileIds, ...run.o.fileIds])] } : {}),
+          ...(run.o.userText ? { userNote: [meal.userNote, run.o.userText].filter(Boolean).join("\n") } : {}),
         }, run.batchId);
         if (!result) throw new Error(`No meal with id ${p.meal_id}`);
         run.record("updated", result.meal, result.before);
-        return ok(run.view(result.meal));
+        return ok(await run.view(result.meal));
       },
     }),
     tool({
@@ -180,33 +211,42 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
       parameters: Type.Object({ meal_id: Type.String() }),
       execute: async (_id, p) => {
         const meal = await editableMeal(run, p.meal_id);
-        const result = await run.store.delete(meal.id, run.batchId);
+        const result = await run.o.store.delete(meal.id, run.batchId);
         if (!result) throw new Error(`No meal with id ${p.meal_id}`);
         run.record("deleted", result.meal, result.meal);
         return ok({ deleted: meal.id });
       },
     }),
   ];
-  if (run.photos.length) {
+  if (run.o.photos?.length || run.o.library) {
+    const maxViews = run.o.maxImageViews ?? 3;
     tools.push(tool({
-      name: "view_photos",
-      label: "View photos",
-      description: "Shows the user's photos again. They are only attached to the first request, to save cost.",
-      parameters: Type.Object({}),
-      execute: () => Promise.resolve({ content: [{ type: "text" as const, text: "The user's photos:" }, ...run.photos], details: undefined }),
+      name: "view_image",
+      label: "View image",
+      description: `Shows one photo the user sent, by its id: this message's photos (only attached to your first request) or ` +
+        `earlier ones from the conversation and meals. Costs money; at most ${maxViews} per message.`,
+      parameters: Type.Object({ image_id: Type.String() }),
+      execute: async (_id, p) => {
+        if (run.imageViews >= maxViews) throw new Error("No more image views for this message");
+        const id = p.image_id.trim();
+        const image = run.o.photos?.find((x) => x.id === id)?.image ?? await run.o.library?.load(id);
+        if (!image) throw new Error(`No photo with id ${id}`);
+        run.imageViews++;
+        return { content: [{ type: "text" as const, text: `Photo ${id}:` }, image], details: undefined };
+      },
     }));
   }
-  if (run.research) {
-    const research = run.research;
+  if (run.o.research) {
+    const research = run.o.research;
     tools.push(tool({
       name: "research_food",
       label: "Research food",
-      description: `Looks up nutrition facts on the web for one product, dish or menu item. Costs money; at most ${run.maxResearch} per message.`,
+      description: `Looks up nutrition facts on the web for one product, dish or menu item. Costs money; at most ${run.o.maxResearch ?? 0} per message.`,
       parameters: Type.Object({
         query: Type.String({ description: 'Brand, product and variant, e.g. "Mahboul potato chips salted 100 g bag"' }),
       }),
       execute: async (_id, p) => {
-        if (run.researches >= run.maxResearch || run.overBudget()) throw new Error("No research left for this message; estimate instead");
+        if (run.researches >= (run.o.maxResearch ?? 0) || run.o.overBudget?.()) throw new Error("No research left for this message; estimate instead");
         const r = await research(p.query);
         run.researches++;
         run.researchCostUsd += r.costUsd;

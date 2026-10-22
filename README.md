@@ -18,7 +18,7 @@ their own API key, within a daily budget of $0.20.
    meals, a correction to a logged meal ("that was 2 eggs, not 3", "I had it this morning at 10AM"), or a question
    ("how much protein is left today?"), and it also answers general food and nutrition questions and chats briefly.
    The reply shows every meal it logged, updated or deleted, the totals and today's
-   progress, with **Undo** (reverts everything that reply changed), **Fix** and **Today** buttons. **Fix** only tells
+   progress, with **Undo** (reverts everything that reply changed), **Fix** and **Today** (sends today's totals as a new message) buttons. **Fix** only tells
    the assistant which meal your next message is about.
    - **Research**: before logging branded, packaged or restaurant food the assistant must look up its nutrition data
      online (a readable label in the photo counts), preferring products sold in your country.
@@ -98,7 +98,7 @@ targets, and the meals logged in the last 24 hours. It works through these tools
 | `update_meal` / `delete_meal` | changes a meal logged in the last 24 h (older meals are read-only) |
 | `read_meals` | reads meals eaten in the last 7 days |
 | `research_food` | one web-searched lookup (Exa via OpenRouter) in its own small request; only the short answer enters the agent's context. At most 2 per message |
-| `view_photos` | shows the photos again; they are attached to the first request only |
+| `view_image` | opens one photo by its short id: this message's (attached to the first request only) or an earlier one from the conversation or a meal; at most 3 per message |
 | `ask_user` | asks a multiple-choice question and ends the run; the answer re-runs it with the Q&A in context |
 | `reply` | the final message; called in the same turn as the last change, so simple messages take one request |
 
@@ -157,6 +157,7 @@ the error message gets a Retry button that runs the same message again (kept in 
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
 | `rate_limits` | per-user fixed-window counters (kept 2 days) |
 | `chat_messages` | your messages and summaries of the assistant's replies: conversation context and edit handling (newest 10 per user kept, older rows trimmed after 3 days) |
+| `photos` | a short random id per photo the user sent, mapped to its Telegram file id, so the assistant can refer to and reopen it |
 | `config` | deployment settings that aren't secret, read by the cron jobs (`functions_url`); no access for the bot's role |
 | `ai_usage` | billed OpenRouter cost, runs and research lookups per user per UTC day, and whether the budget was lifted |
 | `media_group_items` | album photos waiting to be processed together (kept 1 day) |

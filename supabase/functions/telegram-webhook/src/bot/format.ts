@@ -10,9 +10,10 @@ export const dayLabel = (d: Date, u: User) => localDayLabel(d, u.utcOffsetMinute
 const macroLine = (t: Totals) =>
   `<b>${num(t.kcal)} kcal</b>  ·  P ${num(t.proteinG)} g  ·  C ${num(t.carbsG)} g  ·  F ${num(t.fatG)} g`;
 
-function itemsTable(m: Meal): string {
+/** One line per item instead of a monospace table, so long names and portions wrap instead of being cut. */
+function itemLines(m: Meal): string {
   if (!m.items.length) return "";
-  return table(m.items.map((i) => [truncate(i.name, 22), truncate(i.portion, 10), num(i.kcal)]), ["l", "l", "r"]);
+  return `${m.items.map((i) => `• ${esc(i.name)}, ${esc(i.portion)}  ·  ${num(i.kcal)} kcal`).join("\n")}\n\n`;
 }
 
 /** Totals against targets as an aligned block with bars; plain totals when no targets are set. */
@@ -37,7 +38,7 @@ export function progressTable(t: Totals, u: User): string {
 
 export function mealBody(m: Meal): string {
   const note = m.userNote ? `\n<i>${esc(truncate(m.userNote, 200))}</i>` : "";
-  return `${itemsTable(m)}${macroLine(m)}${note}`;
+  return `${itemLines(m)}${macroLine(m)}${note}`;
 }
 
 export const mealButtonLabel = (m: Meal, u: User, withDate = false) =>

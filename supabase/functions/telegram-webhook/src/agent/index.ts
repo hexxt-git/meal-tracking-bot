@@ -7,7 +7,7 @@ import type { QuestionAnswer } from "../domain/question.ts";
 import { isoOffset, localIso, localStamp } from "../domain/time.ts";
 import { base64, chatModel, Media, openRouterStream, OpenRouterError, parseProviderError, researchFood } from "../services/openrouter.ts";
 import { systemPrompt } from "./prompt.ts";
-import { Change, MealStore, mealTools, RunState } from "./tools.ts";
+import { Change, MealStore, mealTools, PhotoLibrary, RunState } from "./tools.ts";
 
 export type { Change } from "./tools.ts";
 
@@ -27,7 +27,12 @@ export type AgentInput = {
   store: MealStore;
   text: string;
   media: Media[];
+  /** Telegram file ids of this message's photos. */
   photoIds: string[];
+  /** Short ids of those photos, in the same order. */
+  photoRefs: string[];
+  /** Earlier photos the assistant can open with view_image. */
+  library?: PhotoLibrary;
   sentAt: Date;
   messageId: number;
   /** Meals logged in the last day, most recent first. */
@@ -58,8 +63,9 @@ export type AgentResult = {
   generationIds: string[];
 };
 
-const PHOTOS_REMOVED = (n: number) =>
-  `[${n === 1 ? "The photo was" : `${n} photos were`} attached to your first request only. Call view_photos to see ${n === 1 ? "it" : "them"} again.]`;
+const PHOTOS_REMOVED = (ids: string[]) =>
+  `[Photo${ids.length === 1 ? "" : "s"} ${ids.join(", ")} ${ids.length === 1 ? "was" : "were"} attached to your first request only. ` +
+  `Call view_image with an id to see one again.]`;
 
 export async function runAgent(input: AgentInput): Promise<AgentResult> {
   const u = input.user;
@@ -80,10 +86,21 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       return r;
     }
     : null;
-  const run = new RunState(
-    input.store, off, input.sentAt, input.text || null, input.photoIds, input.messageId,
-    images, research, config.agent.maxResearchPerRun, () => costUsd >= config.agent.maxRunCostUsd,
-  );
+  const photos = images.flatMap((image, i) => (input.photoRefs[i] ? [{ id: input.photoRefs[i], image }] : []));
+  const run = new RunState({
+    store: input.store,
+    offsetMin: off,
+    sentAt: input.sentAt,
+    userText: input.text || null,
+    fileIds: input.photoIds,
+    messageId: input.messageId,
+    photos,
+    library: input.library,
+    maxImageViews: config.agent.maxImageViews,
+    research,
+    maxResearch: config.agent.maxResearchPerRun,
+    overBudget: () => costUsd >= config.agent.maxRunCostUsd,
+  });
 
   const prompt = systemPrompt({
     now: localStamp(input.sentAt, off),
@@ -94,12 +111,12 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     targets: u.targetKcal
       ? `${u.targetKcal} kcal, protein ${u.targetProteinG} g, carbs ${u.targetCarbsG} g, fat ${u.targetFatG} g`
       : null,
-    recentMeals: input.recentMeals.map((m) => run.view(m)),
-    fixMeal: input.fixMeal && run.view(input.fixMeal),
+    recentMeals: await run.views(input.recentMeals),
+    fixMeal: input.fixMeal && await run.view(input.fixMeal),
     answers: input.answers,
     canAsk,
     canResearch: research != null,
-    hasPhotos: images.length > 0,
+    photoIds: photos.map((p) => p.id),
     history: input.history.map((h) => ({
       who: h.role === "user" ? "User" : "You",
       at: localStamp(h.at, off),
@@ -110,7 +127,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       before: input.edit.before,
       after: input.text,
       sentAt: localStamp(input.edit.sentAt, off),
-      meals: input.edit.meals.map((m) => run.view(m)),
+      meals: await run.views(input.edit.meals),
     },
   });
 
@@ -122,13 +139,12 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       if (usage.generationId) generationIds.push(usage.generationId);
       input.trace?.(`request $${usage.costUsd.toFixed(4)} ${usage.generationId ?? ""}`);
     }),
-    // Photos are sent with the first request only; later requests get a note and can call view_photos.
+    // Photos are sent with the first request only; later requests get a note and can call view_image.
     transformContext: (messages) => {
       if (!images.length || !messages.some((m) => m.role === "assistant")) return Promise.resolve(messages);
       return Promise.resolve(messages.map((m) => {
         if (m.role !== "user" || typeof m.content === "string" || !m.content.some((c) => c.type === "image")) return m;
-        const n = m.content.filter((c) => c.type === "image").length;
-        return { ...m, content: [...m.content.filter((c) => c.type !== "image"), { type: "text" as const, text: PHOTOS_REMOVED(n) }] };
+        return { ...m, content: [...m.content.filter((c) => c.type !== "image"), { type: "text" as const, text: PHOTOS_REMOVED(photos.map((p) => p.id)) }] };
       }));
     },
     toolExecution: "sequential",

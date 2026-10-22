@@ -1,6 +1,6 @@
 // Typed mirror of supabase/migrations (the migrations are the source of truth for DDL, RLS and grants).
 import { sql } from "drizzle-orm";
-import { bigint, boolean, date, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, date, integer, jsonb, numeric, pgSchema, primaryKey, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 import type { MealItem } from "../domain/meal.ts";
 import type { Step, Units } from "../domain/onboarding.ts";
 import type { PendingQuestion, SavedRun } from "../domain/question.ts";
@@ -106,6 +106,13 @@ export const chatMessages = app.table("chat_messages", {
 }, (t) => [primaryKey({ columns: [t.tgId, t.messageId] })]);
 
 export type ChatMessage = typeof chatMessages.$inferSelect;
+
+export const photos = app.table("photos", {
+  tgId: tgId(),
+  id: text("id").notNull(),
+  fileId: text("file_id").notNull(),
+  createdAt: tstz("created_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.tgId, t.id] }), unique().on(t.tgId, t.fileId)]);
 
 export type User = typeof users.$inferSelect;
 export type UserPatch = Partial<Omit<typeof users.$inferInsert, "tgId" | "createdAt" | "updatedAt">>;

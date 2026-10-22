@@ -15,7 +15,7 @@ const meal = (id: string, kcal: number): Meal => ({
 });
 
 Deno.test("run changes fold into their net effect", () => {
-  const run = new RunState({} as never, 0, new Date(), null, [], 1);
+  const run = new RunState({ store: {} as never, offsetMin: 0, sentAt: new Date(), userText: null, fileIds: [], messageId: 1 });
   run.record("created", meal("a", 100));
   run.record("updated", meal("a", 150), meal("a", 100));
   run.record("updated", meal("b", 300), meal("b", 200));
@@ -84,7 +84,7 @@ Deno.test("only edits that change words count", () => {
 Deno.test("prompt carries the recent conversation, oldest first, with attachments marked", () => {
   const prompt = systemPrompt({
     now: "Mon 2026-10-19 20:00", nowIso: "2026-10-19T20:00:00+01:00", offset: "+01:00", country: "Algeria", units: "metric",
-    targets: null, recentMeals: [], fixMeal: null, answers: [], canAsk: true, canResearch: true, hasPhotos: false,
+    targets: null, recentMeals: [], fixMeal: null, answers: [], canAsk: true, canResearch: true, photoIds: [],
     history: [
       { who: "User", at: "Mon 2026-10-19 19:58", text: "is white rice\nok before the gym?", attachments: [] },
       { who: "You", at: "Mon 2026-10-19 19:58", text: "Yes, it digests fast.", attachments: [] },

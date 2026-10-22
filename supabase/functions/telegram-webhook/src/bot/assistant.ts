@@ -4,7 +4,8 @@ import type { Meal } from "../db/index.ts";
 import { sumTotals } from "../domain/meal.ts";
 import { ChatInput, isMeaningfulEdit, isOpen, Job, newQuestionId, PendingQuestion } from "../domain/question.ts";
 import { dayStart, mealTimeLabel } from "../domain/time.ts";
-import { Media, OpenRouterError } from "../services/openrouter.ts";
+import type { PhotoLibrary } from "../agent/tools.ts";
+import { base64, Media, OpenRouterError } from "../services/openrouter.ts";
 import { esc, telegram } from "../telegram/api.ts";
 import type { Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
@@ -19,7 +20,8 @@ export async function respond(ctx: Ctx, msg: Message) {
   const input = await collectInput(ctx, msg);
   if (!input) return;
   if (!input.text && !input.photoIds.length && !input.audio) return ctx.send(LOG_HINT);
-  await ctx.db.messages.remember(input.messageId, input.text, new Date(input.sentAt), attachments(input));
+  const photoRefs = await ctx.db.photos.register(input.photoIds);
+  await ctx.db.messages.remember(input.messageId, input.text, new Date(input.sentAt), attachments(input, photoRefs));
 
   const q = ctx.user.pendingQuestion;
   if (isOpen(q, Date.now(), config.agent.questionTtlMs) && input.text && !input.photoIds.length && !input.audio) {
@@ -151,6 +153,8 @@ async function run(ctx: Ctx, job: Job) {
       text: input.text,
       media: await downloadMedia(input),
       photoIds: input.photoIds,
+      photoRefs: await ctx.db.photos.register(input.photoIds),
+      library: photoLibrary(ctx),
       sentAt: new Date(input.sentAt),
       messageId: input.messageId,
       recentMeals: await ctx.db.meals.loggedSince(new Date(Date.now() - DAY_MS)),
@@ -214,8 +218,27 @@ const retryKeyboard = (id: string) => [[btn("Retry", `retry:${id}`)]];
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 
-function attachments(input: ChatInput): string[] {
-  return [...input.photoIds.map(() => "photo"), ...(input.audio ? ["voice note"] : [])];
+function attachments(input: ChatInput, photoRefs: string[]): string[] {
+  return [...photoRefs.map((id) => `photo ${id}`), ...(input.audio ? ["voice note"] : [])];
+}
+
+function photoLibrary(ctx: Ctx): PhotoLibrary {
+  return {
+    idsFor: (fileIds) => ctx.db.photos.idsFor(fileIds),
+    load: async (id) => {
+      const fileId = await ctx.db.photos.fileId(id);
+      if (!fileId) return null;
+      const data = await telegram.download(fileId);
+      return { type: "image", data: base64(data), mimeType: imageMime(data) };
+    },
+  };
+}
+
+/** Photos are JPEG; images sent as files can be PNG or WebP. */
+function imageMime(b: Uint8Array) {
+  if (b[0] === 0x89 && b[1] === 0x50) return "image/png";
+  if (b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return "image/webp";
+  return "image/jpeg";
 }
 
 async function chatHistory(ctx: Ctx, currentMessageId: number) {
@@ -263,7 +286,7 @@ async function resultView(ctx: Ctx, r: AgentResult): Promise<View> {
   const fixable = r.changes.findLast((c) => c.kind !== "deleted");
   return {
     text: truncateHtml(parts.join("\n\n")),
-    keyboard: [[btn("Undo", `undo:${r.batchId}`), ...(fixable ? [btn("Fix", `fix:${fixable.meal.id}`)] : []), btn("Today", "day:0")]],
+    keyboard: [[btn("Undo", `undo:${r.batchId}`), ...(fixable ? [btn("Fix", `fix:${fixable.meal.id}`)] : []), btn("Today", "today")]],
   };
 }
 
