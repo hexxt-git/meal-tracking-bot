@@ -1,5 +1,6 @@
 export type Sex = "male" | "female";
-export type Activity = "sedentary" | "light" | "moderate" | "active" | "very_active";
+export type Activity =
+  "sedentary" | "light" | "moderate" | "active" | "very_active";
 export type Objective = "lose" | "maintain" | "gain";
 
 export const ACTIVITY: Record<Activity, { factor: number; label: string }> = {
@@ -20,21 +21,40 @@ export type Profile = {
   pace_kg_per_week: number;
 };
 
-export type Targets = { kcal: number; protein_g: number; carbs_g: number; fat_g: number };
+export type Targets = {
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+};
 
 const KCAL_PER_KG_FAT = 7700;
 
 export function computeTargets(p: Profile): Targets {
-  const bmr = 10 * p.weight_kg + 6.25 * p.height_cm - 5 * p.age + (p.sex === "male" ? 5 : -161);
+  const bmr =
+    10 * p.weight_kg +
+    6.25 * p.height_cm -
+    5 * p.age +
+    (p.sex === "male" ? 5 : -161);
   const tdee = bmr * ACTIVITY[p.activity].factor;
   const delta = (p.pace_kg_per_week * KCAL_PER_KG_FAT) / 7;
-  const raw = p.objective === "lose" ? tdee - delta : p.objective === "gain" ? tdee + delta : tdee;
+  const raw =
+    p.objective === "lose"
+      ? tdee - delta
+      : p.objective === "gain"
+        ? tdee + delta
+        : tdee;
   const floor = p.sex === "male" ? 1500 : 1200;
   const kcal = Math.round(Math.max(raw, floor) / 10) * 10;
 
-  const protein_g = Math.round(p.weight_kg * (p.objective === "lose" ? 2.0 : 1.8));
+  const protein_g = Math.round(
+    p.weight_kg * (p.objective === "lose" ? 2.0 : 1.8),
+  );
   const fat_g = Math.round((kcal * 0.25) / 9);
-  const carbs_g = Math.max(0, Math.round((kcal - protein_g * 4 - fat_g * 9) / 4));
+  const carbs_g = Math.max(
+    0,
+    Math.round((kcal - protein_g * 4 - fat_g * 9) / 4),
+  );
   return { kcal, protein_g, carbs_g, fat_g };
 }
 

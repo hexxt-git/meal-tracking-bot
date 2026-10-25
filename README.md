@@ -92,15 +92,15 @@ Each message starts one agent run (`src/agent/`). The model gets the current loc
 targets, and the meals logged in the last 24 hours. It works through these tools in as many turns as it needs (up to
 6, 90 seconds at most):
 
-| Tool | Does |
-|---|---|
-| `log_meal` | records a new meal with its item breakdown and optional eaten time |
-| `update_meal` / `delete_meal` | changes a meal logged in the last 24 h (older meals are read-only) |
-| `read_meals` | reads meals eaten in the last 7 days |
-| `research_food` | one web-searched lookup (Exa via OpenRouter) in its own small request; only the short answer enters the agent's context. At most 2 per message |
-| `view_image` | opens one photo by its short id: this message's (attached to the first request only) or an earlier one from the conversation or a meal; at most 3 per message |
-| `ask_user` | asks a multiple-choice question and ends the run; the answer re-runs it with the Q&A in context |
-| `reply` | the final message; called in the same turn as the last change, so simple messages take one request |
+| Tool                          | Does                                                                                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `log_meal`                    | records a new meal with its item breakdown and optional eaten time                                                                                            |
+| `update_meal` / `delete_meal` | changes a meal logged in the last 24 h (older meals are read-only)                                                                                            |
+| `read_meals`                  | reads meals eaten in the last 7 days                                                                                                                          |
+| `research_food`               | one web-searched lookup (Exa via OpenRouter) in its own small request; only the short answer enters the agent's context. At most 2 per message                |
+| `view_image`                  | opens one photo by its short id: this message's (attached to the first request only) or an earlier one from the conversation or a meal; at most 3 per message |
+| `ask_user`                    | asks a multiple-choice question and ends the run; the answer re-runs it with the Q&A in context                                                               |
+| `reply`                       | the final message; called in the same turn as the last change, so simple messages take one request                                                            |
 
 Every write in a run shares one undo batch. The function logs each tool call, each request's billed cost and its
 OpenRouter generation id (look one up for free with `GET https://openrouter.ai/api/v1/generation?id=…`).
@@ -109,11 +109,11 @@ OpenRouter generation id (look one up for free with `GET https://openrouter.ai/a
 
 Measured on the test photos (billed by OpenRouter):
 
-| Message | Requests | Cost |
-|---|---|---|
-| Photo of a home-made or unbranded meal | 1 | $0.0055 |
-| Text correction ("I had it at 10am") | 1 | $0.003 |
-| Question, then the answer | 1 + 1 | $0.0017 + $0.0019 |
+| Message                                        | Requests       | Cost                                         |
+| ---------------------------------------------- | -------------- | -------------------------------------------- |
+| Photo of a home-made or unbranded meal         | 1              | $0.0055                                      |
+| Text correction ("I had it at 10am")           | 1              | $0.003                                       |
+| Question, then the answer                      | 1 + 1          | $0.0017 + $0.0019                            |
 | Photo of two branded products, both researched | 2 + 2 research | $0.029 at low effort (research $0.0088 each) |
 
 Reasoning tokens are most of a request's cost: the same photo cost $0.0125 at medium effort, $0.011 at low and
@@ -149,27 +149,27 @@ the error message gets a Retry button that runs the same message again (kept in 
 
 ## Data model (`app` schema)
 
-| Table | Purpose |
-|---|---|
-| `users` | Telegram id, chat id, setup step, profile, timezone offset, country, daily goals, Fix target, open question, last failed request |
-| `meals` | `eaten_at` (when it was eaten, settable by the AI), `logged_at` (when the message was sent), title, AI item breakdown (JSON), totals, Telegram photo file ids, the user's text |
-| `meal_revisions` | snapshot before each create/edit/delete, grouped by `batch_id`, for Undo (kept 30 days) |
-| `processed_updates` | Telegram update ids, for deduplication (kept 3 days) |
-| `rate_limits` | per-user fixed-window counters (kept 2 days) |
-| `chat_messages` | your messages and summaries of the assistant's replies: conversation context and edit handling (newest 10 per user kept, older rows trimmed after 3 days) |
-| `photos` | a short random id per photo the user sent, mapped to its Telegram file id, so the assistant can refer to and reopen it |
-| `config` | deployment settings that aren't secret, read by the cron jobs (`functions_url`); no access for the bot's role |
-| `ai_usage` | billed OpenRouter cost, runs and research lookups per user per UTC day, and whether the budget was lifted |
-| `media_group_items` | album photos waiting to be processed together (kept 1 day) |
+| Table               | Purpose                                                                                                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `users`             | Telegram id, chat id, setup step, profile, timezone offset, country, daily goals, Fix target, open question, last failed request                                               |
+| `meals`             | `eaten_at` (when it was eaten, settable by the AI), `logged_at` (when the message was sent), title, AI item breakdown (JSON), totals, Telegram photo file ids, the user's text |
+| `meal_revisions`    | snapshot before each create/edit/delete, grouped by `batch_id`, for Undo (kept 30 days)                                                                                        |
+| `processed_updates` | Telegram update ids, for deduplication (kept 3 days)                                                                                                                           |
+| `rate_limits`       | per-user fixed-window counters (kept 2 days)                                                                                                                                   |
+| `chat_messages`     | your messages and summaries of the assistant's replies: conversation context and edit handling (newest 10 per user kept, older rows trimmed after 3 days)                      |
+| `photos`            | a short random id per photo the user sent, mapped to its Telegram file id, so the assistant can refer to and reopen it                                                         |
+| `config`            | deployment settings that aren't secret, read by the cron jobs (`functions_url`); no access for the bot's role                                                                  |
+| `ai_usage`          | billed OpenRouter cost, runs and research lookups per user per UTC day, and whether the budget was lifted                                                                      |
+| `media_group_items` | album photos waiting to be processed together (kept 1 day)                                                                                                                     |
 
 Photos aren't stored; only Telegram `file_id`s are kept.
 
 ## Configuration
 
-| File | Used by | Contents |
-|---|---|---|
-| `.env` (from `.env.example`) | your machine: CLI, `setup:bot` | project ref, DB password, bot token, webhook secret |
-| `supabase/.env` (from `supabase/.env.example`) | `secrets:set` → function env | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET` |
+| File                                           | Used by                        | Contents                                                       |
+| ---------------------------------------------- | ------------------------------ | -------------------------------------------------------------- |
+| `.env` (from `.env.example`)                   | your machine: CLI, `setup:bot` | project ref, DB password, bot token, webhook secret            |
+| `supabase/.env` (from `supabase/.env.example`) | `secrets:set` → function env   | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET` |
 
 `SUPABASE_DB_URL` is provided to the function by Supabase automatically. Both `.env` files are git-ignored.
 

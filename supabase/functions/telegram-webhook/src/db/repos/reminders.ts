@@ -14,7 +14,11 @@ export function remindersRepo(run: Run) {
      */
     claimDue: (hours: number[]) =>
       run(async (tx) => {
-        const rows = await tx.execute<{ tg_id: string; chat_id: string; hours: number }>(sql`
+        const rows = await tx.execute<{
+          tg_id: string;
+          chat_id: string;
+          hours: number;
+        }>(sql`
           with due as (
             select u.tg_id, u.last_reminder_at, l.last_meal_at,
               (select max(h) from unnest(${`{${hours.join(",")}}`}::int[]) h
@@ -32,10 +36,20 @@ export function remindersRepo(run: Run) {
             and (d.last_reminder_at is null or d.last_reminder_at < d.last_meal_at + make_interval(hours => d.hours))
             and u.last_reminder_at is not distinct from d.last_reminder_at
           returning u.tg_id, u.chat_id, d.hours`);
-        return rows.map((r): DueReminder => ({ tgId: Number(r.tg_id), chatId: Number(r.chat_id), hours: Number(r.hours) }));
+        return rows.map((r): DueReminder => ({
+          tgId: Number(r.tg_id),
+          chatId: Number(r.chat_id),
+          hours: Number(r.hours),
+        }));
       }),
 
     /** For users who blocked the bot. */
-    disable: (tgId: number) => run((tx) => tx.update(users).set({ remindersEnabled: false }).where(eq(users.tgId, tgId))),
+    disable: (tgId: number) =>
+      run((tx) =>
+        tx
+          .update(users)
+          .set({ remindersEnabled: false })
+          .where(eq(users.tgId, tgId)),
+      ),
   };
 }

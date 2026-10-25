@@ -5,9 +5,23 @@ import type { Meal } from "../db/index.ts";
 import { countryName } from "../domain/countries.ts";
 import type { QuestionAnswer } from "../domain/question.ts";
 import { isoOffset, localIso, localStamp } from "../domain/time.ts";
-import { base64, chatModel, Media, openRouterStream, OpenRouterError, parseProviderError, researchFood } from "../services/openrouter.ts";
+import {
+  base64,
+  chatModel,
+  Media,
+  openRouterStream,
+  OpenRouterError,
+  parseProviderError,
+  researchFood,
+} from "../services/openrouter.ts";
 import { systemPrompt } from "./prompt.ts";
-import { Change, MealStore, mealTools, PhotoLibrary, RunState } from "./tools.ts";
+import {
+  Change,
+  MealStore,
+  mealTools,
+  PhotoLibrary,
+  RunState,
+} from "./tools.ts";
 
 export type { Change } from "./tools.ts";
 
@@ -41,7 +55,12 @@ export type AgentInput = {
   answers: QuestionAnswer[];
   allowResearch: boolean;
   /** Earlier messages, oldest first, not including this one. */
-  history: { role: "user" | "assistant"; text: string; attachments: string[]; at: Date }[];
+  history: {
+    role: "user" | "assistant";
+    text: string;
+    attachments: string[];
+    at: Date;
+  }[];
   /** Set when the user edited an earlier message; `text` is then the edited version. */
   edit?: { before: string | null; sentAt: Date; meals: Meal[] };
   /** Receives one line per tool call and result, for logs. */
@@ -72,21 +91,27 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   const off = u.utcOffsetMinutes;
   const canAsk = input.answers.length < config.agent.maxQuestions;
   const images: ImageContent[] = input.media.flatMap((m) =>
-    m.kind === "image" ? [{ type: "image", data: base64(m.data), mimeType: m.mime }] : []
+    m.kind === "image"
+      ? [{ type: "image", data: base64(m.data), mimeType: m.mime }]
+      : [],
   );
   const country = countryName(u.country);
   const generationIds: string[] = [];
   let costUsd = 0;
   const research = input.allowResearch
     ? async (query: string) => {
-      const r = await researchFood(input.apiKey, query, country);
-      costUsd += r.costUsd;
-      if (r.generationId) generationIds.push(r.generationId);
-      input.trace?.(`research $${r.costUsd.toFixed(4)} ${r.generationId ?? ""}`);
-      return r;
-    }
+        const r = await researchFood(input.apiKey, query, country);
+        costUsd += r.costUsd;
+        if (r.generationId) generationIds.push(r.generationId);
+        input.trace?.(
+          `research $${r.costUsd.toFixed(4)} ${r.generationId ?? ""}`,
+        );
+        return r;
+      }
     : null;
-  const photos = images.flatMap((image, i) => (input.photoRefs[i] ? [{ id: input.photoRefs[i], image }] : []));
+  const photos = images.flatMap((image, i) =>
+    input.photoRefs[i] ? [{ id: input.photoRefs[i], image }] : [],
+  );
   const run = new RunState({
     store: input.store,
     offsetMin: off,
@@ -112,7 +137,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       ? `${u.targetKcal} kcal, protein ${u.targetProteinG} g, carbs ${u.targetCarbsG} g, fat ${u.targetFatG} g`
       : null,
     recentMeals: await run.views(input.recentMeals),
-    fixMeal: input.fixMeal && await run.view(input.fixMeal),
+    fixMeal: input.fixMeal && (await run.view(input.fixMeal)),
     answers: input.answers,
     canAsk,
     canResearch: research != null,
@@ -133,26 +158,56 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
 
   let turns = 0;
   const agent = new Agent({
-    initialState: { systemPrompt: prompt, model: chatModel(), thinkingLevel: config.agent.firstEffort, tools: mealTools(run, canAsk) },
-    streamFn: openRouterStream(input.apiKey, input.media.filter((m) => m.kind === "audio"), (usage) => {
-      costUsd += usage.costUsd;
-      if (usage.generationId) generationIds.push(usage.generationId);
-      input.trace?.(`request $${usage.costUsd.toFixed(4)} ${usage.generationId ?? ""}`);
-    }),
+    initialState: {
+      systemPrompt: prompt,
+      model: chatModel(),
+      thinkingLevel: config.agent.firstEffort,
+      tools: mealTools(run, canAsk),
+    },
+    streamFn: openRouterStream(
+      input.apiKey,
+      input.media.filter((m) => m.kind === "audio"),
+      (usage) => {
+        costUsd += usage.costUsd;
+        if (usage.generationId) generationIds.push(usage.generationId);
+        input.trace?.(
+          `request $${usage.costUsd.toFixed(4)} ${usage.generationId ?? ""}`,
+        );
+      },
+    ),
     // Photos are sent with the first request only; later requests get a note and can call view_image.
     transformContext: (messages) => {
-      if (!images.length || !messages.some((m) => m.role === "assistant")) return Promise.resolve(messages);
-      return Promise.resolve(messages.map((m) => {
-        if (m.role !== "user" || typeof m.content === "string" || !m.content.some((c) => c.type === "image")) return m;
-        return { ...m, content: [...m.content.filter((c) => c.type !== "image"), { type: "text" as const, text: PHOTOS_REMOVED(photos.map((p) => p.id)) }] };
-      }));
+      if (!images.length || !messages.some((m) => m.role === "assistant"))
+        return Promise.resolve(messages);
+      return Promise.resolve(
+        messages.map((m) => {
+          if (
+            m.role !== "user" ||
+            typeof m.content === "string" ||
+            !m.content.some((c) => c.type === "image")
+          )
+            return m;
+          return {
+            ...m,
+            content: [
+              ...m.content.filter((c) => c.type !== "image"),
+              {
+                type: "text" as const,
+                text: PHOTOS_REMOVED(photos.map((p) => p.id)),
+              },
+            ],
+          };
+        }),
+      );
     },
     toolExecution: "sequential",
     finishTurn: ({ message, toolResults }) => {
       turns++;
-      if (message.stopReason === "error" || message.stopReason === "aborted") return;
+      if (message.stopReason === "error" || message.stopReason === "aborted")
+        return;
       const failed = toolResults.some((r) => r.isError);
-      if (run.question || turns >= config.agent.maxTurns) return { action: "end" };
+      if (run.question || turns >= config.agent.maxTurns)
+        return { action: "end" };
       if (run.replyText !== null && !failed) return { action: "end" };
     },
   });
@@ -160,9 +215,12 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   if (input.trace) {
     const trace = input.trace;
     agent.subscribe((e) => {
-      if (e.type === "tool_execution_start") trace(`→ ${e.toolName} ${JSON.stringify(e.args).slice(0, 600)}`);
+      if (e.type === "tool_execution_start")
+        trace(`→ ${e.toolName} ${JSON.stringify(e.args).slice(0, 600)}`);
       if (e.type === "tool_execution_end") {
-        const text = (e.result.content as { type: string; text?: string }[]).map((c) => c.text ?? "").join("");
+        const text = (e.result.content as { type: string; text?: string }[])
+          .map((c) => c.text ?? "")
+          .join("");
         trace(`${e.isError ? "✗" : "←"} ${e.toolName} ${text.slice(0, 300)}`);
       }
     });
@@ -174,11 +232,25 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     agent.abort();
   }, config.agent.timeoutMs);
   try {
-    await agent.prompt(input.edit ? `(edited message) ${input.text}` : input.text || "(no text)", images);
-    for (let retry = 0; retry < config.agent.transientRetries && !timedOut; retry++) {
+    await agent.prompt(
+      input.edit ? `(edited message) ${input.text}` : input.text || "(no text)",
+      images,
+    );
+    for (
+      let retry = 0;
+      retry < config.agent.transientRetries && !timedOut;
+      retry++
+    ) {
       const failed = agent.state.messages.at(-1);
-      if (!agent.state.errorMessage || failed?.role !== "assistant" || !parseProviderError(agent.state.errorMessage).transient) break;
-      input.trace?.(`retrying after: ${agent.state.errorMessage.slice(0, 200)}`);
+      if (
+        !agent.state.errorMessage ||
+        failed?.role !== "assistant" ||
+        !parseProviderError(agent.state.errorMessage).transient
+      )
+        break;
+      input.trace?.(
+        `retrying after: ${agent.state.errorMessage.slice(0, 200)}`,
+      );
       agent.state.messages = agent.state.messages.slice(0, -1);
       await agent.continue();
     }
@@ -188,7 +260,13 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
 
   const assistant = agent.state.messages.filter((m) => m.role === "assistant");
   const last = assistant.at(-1);
-  const reply = run.replyText ?? last?.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("").trim() ?? "";
+  const reply =
+    run.replyText ??
+    last?.content
+      .flatMap((c) => (c.type === "text" ? [c.text] : []))
+      .join("")
+      .trim() ??
+    "";
   const errorMessage = agent.state.errorMessage;
   return {
     reply,

@@ -12,7 +12,8 @@ export async function sendReminders(): Promise<number> {
       await telegram.send(r.chatId, reminderText(r.hours));
       sent++;
     } catch (e) {
-      if (e instanceof Error && e.message.includes("Forbidden")) await db.reminders.disable(r.tgId);
+      if (e instanceof Error && e.message.includes("Forbidden"))
+        await db.reminders.disable(r.tgId);
       else console.error("reminder", r.tgId, e);
     }
   }

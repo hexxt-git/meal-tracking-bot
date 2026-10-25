@@ -253,15 +253,22 @@ export const COUNTRIES: Record<string, string> = {
 
 export const isCountry = (code: string) => Object.hasOwn(COUNTRIES, code);
 
-export const countryName = (code: string | null) => (code && isCountry(code) ? COUNTRIES[code] : null);
+export const countryName = (code: string | null) =>
+  code && isCountry(code) ? COUNTRIES[code] : null;
 
 /** "Åland Islands" → "A". */
 const initial = (name: string) => name.normalize("NFD").charAt(0).toUpperCase();
 
-export const COUNTRY_LETTERS = [...new Set(Object.values(COUNTRIES).map(initial))].sort();
+export const COUNTRY_LETTERS = [
+  ...new Set(Object.values(COUNTRIES).map(initial)),
+].sort();
 
 export const COUNTRY_PAGE_SIZE = 16;
 
-export function countriesByLetter(letter: string): [code: string, name: string][] {
-  return Object.entries(COUNTRIES).filter(([, name]) => initial(name) === letter);
+export function countriesByLetter(
+  letter: string,
+): [code: string, name: string][] {
+  return Object.entries(COUNTRIES).filter(
+    ([, name]) => initial(name) === letter,
+  );
 }

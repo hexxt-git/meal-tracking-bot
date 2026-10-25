@@ -11,12 +11,18 @@ import { importCsv, isCsvFile } from "./screens/journal.ts";
 import { saveKey, stepView, welcomeView } from "./screens/onboarding.ts";
 
 export async function handleUpdate(update: Update) {
-  const chat = update.message?.chat ?? update.edited_message?.chat ?? update.callback_query?.message?.chat ??
+  const chat =
+    update.message?.chat ??
+    update.edited_message?.chat ??
+    update.callback_query?.message?.chat ??
     update.my_chat_member?.chat;
   if (!chat) return;
-  if (chat.type !== "private") return void await telegram.leave(chat.id);
+  if (chat.type !== "private") return void (await telegram.leave(chat.id));
 
-  const from = update.message?.from ?? update.edited_message?.from ?? update.callback_query?.from;
+  const from =
+    update.message?.from ??
+    update.edited_message?.from ??
+    update.callback_query?.from;
   if (!from) return;
 
   const db = userDb(from.id);
@@ -30,8 +36,15 @@ export async function handleUpdate(update: Update) {
 
   const cb = update.callback_query;
   if (admission.status === "rate_limited") {
-    if (cb) return void await telegram.answerCallback(cb.id, "Too many requests. Try again in a bit.");
-    return void await telegram.send(chat.id, "You're sending messages too fast. Please try again in a bit.");
+    if (cb)
+      return void (await telegram.answerCallback(
+        cb.id,
+        "Too many requests. Try again in a bit.",
+      ));
+    return void (await telegram.send(
+      chat.id,
+      "You're sending messages too fast. Please try again in a bit.",
+    ));
   }
 
   const ctx = createCtx(admission.user, db);
@@ -41,8 +54,12 @@ export async function handleUpdate(update: Update) {
     else if (update.edited_message) await routeEdit(ctx, update.edited_message);
   } catch (e) {
     console.error(e);
-    if (cb) await telegram.answerCallback(cb.id, "Something went wrong").catch(() => {});
-    else await ctx.send("Something went wrong. Please try again.").catch(() => {});
+    if (cb)
+      await telegram
+        .answerCallback(cb.id, "Something went wrong")
+        .catch(() => {});
+    else
+      await ctx.send("Something went wrong. Please try again.").catch(() => {});
   }
 }
 
@@ -51,17 +68,25 @@ function routeMessage(ctx: Ctx, msg: Message) {
   if (text?.startsWith("/")) return runCommand(ctx, msg);
   if (text && looksLikeKey(text)) return saveKey(ctx, text, msg.message_id);
   if (ctx.user.onboardingStep === "key") return ctx.send(welcomeView());
-  if (msg.document && isCsvFile(msg.document)) return importCsv(ctx, msg.document);
+  if (msg.document && isCsvFile(msg.document))
+    return importCsv(ctx, msg.document);
   const nav = text ? runReplyKey(ctx, text) : null;
   if (nav) return nav;
   // During setup, typed text would be ambiguous, so re-show the current step instead of passing it to the assistant.
-  if (text && ctx.user.onboardingStep !== "done") return ctx.send(stepView(ctx));
+  if (text && ctx.user.onboardingStep !== "done")
+    return ctx.send(stepView(ctx));
   return respond(ctx, msg);
 }
 
 /** Only edits to messages the assistant could have handled are passed on; commands, keys and setup answers are not. */
 function routeEdit(ctx: Ctx, msg: Message) {
   const text = (msg.text ?? msg.caption ?? "").trim();
-  if (ctx.user.onboardingStep !== "done" || !text || text.startsWith("/") || looksLikeKey(text)) return;
+  if (
+    ctx.user.onboardingStep !== "done" ||
+    !text ||
+    text.startsWith("/") ||
+    looksLikeKey(text)
+  )
+    return;
   return respondToEdit(ctx, msg);
 }

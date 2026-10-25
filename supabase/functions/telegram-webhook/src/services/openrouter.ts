@@ -8,7 +8,9 @@ export { OpenRouterError, parseProviderError } from "./openrouter-error.ts";
 
 const ENDPOINT = "https://openrouter.ai/api/v1";
 
-export type Media = { kind: "image"; mime: string; data: Uint8Array } | { kind: "audio"; format: string; data: Uint8Array };
+export type Media =
+  | { kind: "image"; mime: string; data: Uint8Array }
+  | { kind: "audio"; format: string; data: Uint8Array };
 
 const models = createModels();
 models.setProvider(openrouterProvider());
@@ -21,7 +23,8 @@ export const chatModel = () => {
 
 export function base64(bytes: Uint8Array) {
   let s = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(s);
 }
 
@@ -56,42 +59,82 @@ export function openRouterStream(
       maxRetryDelayMs: 10_000,
       onPayload: (raw) => {
         const payload = raw as Payload;
-        payload.reasoning = { effort: requests++ === 0 ? config.agent.firstEffort : config.agent.followUpEffort };
+        payload.reasoning = {
+          effort:
+            requests++ === 0
+              ? config.agent.firstEffort
+              : config.agent.followUpEffort,
+        };
         payload.max_completion_tokens = config.agent.maxOutputTokens;
         const user = payload.messages.find((m) => m.role === "user");
         if (user && audio.length) {
-          const parts = typeof user.content === "string" ? [{ type: "text", text: user.content }] : user.content;
-          user.content = [...parts, ...audio.map((a) => ({ type: "input_audio", input_audio: { data: base64(a.data), format: a.format } }))];
+          const parts =
+            typeof user.content === "string"
+              ? [{ type: "text", text: user.content }]
+              : user.content;
+          user.content = [
+            ...parts,
+            ...audio.map((a) => ({
+              type: "input_audio",
+              input_audio: { data: base64(a.data), format: a.format },
+            })),
+          ];
         }
         return payload;
       },
-      onProviderStreamEvent: onUsage && ((event) => {
-        const chunk = event as UsageChunk;
-        if (chunk.usage) onUsage({ generationId: chunk.id ?? null, costUsd: chunk.usage.cost ?? 0 });
-      }),
+      onProviderStreamEvent:
+        onUsage &&
+        ((event) => {
+          const chunk = event as UsageChunk;
+          if (chunk.usage)
+            onUsage({
+              generationId: chunk.id ?? null,
+              costUsd: chunk.usage.cost ?? 0,
+            });
+        }),
     });
 }
 
-export type Research = { answer: string; sources: string[]; costUsd: number; generationId: string | null };
+export type Research = {
+  answer: string;
+  sources: string[];
+  costUsd: number;
+  generationId: string | null;
+};
 
 /**
  * One web-searched lookup in its own small request, so search results never enter the agent's context;
  * the agent only sees this short answer.
  */
-export async function researchFood(apiKey: string, query: string, country: string | null): Promise<Research> {
+export async function researchFood(
+  apiKey: string,
+  query: string,
+  country: string | null,
+): Promise<Research> {
   const where = country ? ` as sold in ${country}` : "";
   const res = await fetch(`${ENDPOINT}/chat/completions`, {
     method: "POST",
-    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json", "x-title": "Meal Tracker" },
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+      "x-title": "Meal Tracker",
+    },
     body: JSON.stringify({
       model: config.model,
       reasoning: { effort: config.research.effort },
       max_tokens: config.research.maxOutputTokens,
-      plugins: [{ id: "web", engine: config.research.engine, max_results: config.research.maxResults }],
+      plugins: [
+        {
+          id: "web",
+          engine: config.research.engine,
+          max_results: config.research.maxResults,
+        },
+      ],
       messages: [
         {
           role: "system",
-          content: "You look up nutrition facts on the web. Reply in at most 6 short lines: the exact product found, " +
+          content:
+            "You look up nutrition facts on the web. Reply in at most 6 short lines: the exact product found, " +
             "kcal, protein, carbs and fat per 100 g (or per serving, saying which), the usual pack or serving size, and the source. " +
             "Only report numbers you found in the search results. If nothing matches, start with NOT FOUND and name the closest comparable product with its numbers.",
         },
@@ -100,14 +143,28 @@ export async function researchFood(apiKey: string, query: string, country: strin
     }),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.error) throw new OpenRouterError(body.error?.code ?? res.status, body.error?.message ?? `HTTP ${res.status}`);
+  if (!res.ok || body.error)
+    throw new OpenRouterError(
+      body.error?.code ?? res.status,
+      body.error?.message ?? `HTTP ${res.status}`,
+    );
   const message = body.choices?.[0]?.message ?? {};
-  const sources = (message.annotations ?? []).flatMap((a: { url_citation?: { url?: string } }) => (a.url_citation?.url ? [a.url_citation.url] : []));
-  return { answer: String(message.content ?? "").trim(), sources, costUsd: body.usage?.cost ?? 0, generationId: body.id ?? null };
+  const sources = (message.annotations ?? []).flatMap(
+    (a: { url_citation?: { url?: string } }) =>
+      a.url_citation?.url ? [a.url_citation.url] : [],
+  );
+  return {
+    answer: String(message.content ?? "").trim(),
+    sources,
+    costUsd: body.usage?.cost ?? 0,
+    generationId: body.id ?? null,
+  };
 }
 
 export async function isValidKey(apiKey: string): Promise<boolean> {
-  const res = await fetch(`${ENDPOINT}/key`, { headers: { authorization: `Bearer ${apiKey}` } });
+  const res = await fetch(`${ENDPOINT}/key`, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  });
   await res.body?.cancel();
   return res.ok;
 }

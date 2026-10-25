@@ -36,10 +36,14 @@ To start, paste an OpenRouter API key into this chat. It is only used for your o
 
 export const keyPromptView = (back?: string): View => ({
   text: "Paste your OpenRouter API key into this chat. Your message is deleted right after it's saved.",
-  keyboard: [[link("Get a key at openrouter.ai", KEYS_URL)], ...(back ? [[btn("‹ Back", back)]] : [])],
+  keyboard: [
+    [link("Get a key at openrouter.ai", KEYS_URL)],
+    ...(back ? [[btn("‹ Back", back)]] : []),
+  ],
 });
 
-const isNumeric = (s: Step): s is NumericStep => s === "age" || s === "height" || s === "weight";
+const isNumeric = (s: Step): s is NumericStep =>
+  s === "age" || s === "height" || s === "weight";
 
 const QUESTIONS: Partial<Record<Step, string>> = {
   units: "Which units do you use?",
@@ -58,14 +62,23 @@ const QUESTIONS: Partial<Record<Step, string>> = {
  * Renders the current onboarding step. `value` is the stepper position for numeric steps, or the picker page for
  * timezone; `country` is the letter and page open in the country picker.
  */
-export function stepView(ctx: Ctx, value?: number, prefix = "", country: CountryNav = null): View {
+export function stepView(
+  ctx: Ctx,
+  value?: number,
+  prefix = "",
+  country: CountryNav = null,
+): View {
   const u = ctx.user;
   const step = u.onboardingStep;
   const header = `${prefix}<b>Setup</b>  ·  step ${PROFILE_STEPS.indexOf(step) + 1} of ${PROFILE_STEPS.length}\n\n${QUESTIONS[step] ?? ""}`;
   const prev = prevStep(step, u.objective);
   // The country step has its own skip; skipping setup there would also skip computing goals.
-  const footer: Button[] = [...(prev ? [btn("‹ Back", "ob:back")] : []), ...(step === "country" ? [] : [btn("Skip setup", "ob:skip")])];
-  const choose = (options: [string, string][]) => options.map(([label, v]) => btn(label, `ob:${step}:${v}`));
+  const footer: Button[] = [
+    ...(prev ? [btn("‹ Back", "ob:back")] : []),
+    ...(step === "country" ? [] : [btn("Skip setup", "ob:skip")]),
+  ];
+  const choose = (options: [string, string][]) =>
+    options.map(([label, v]) => btn(label, `ob:${step}:${v}`));
 
   if (isNumeric(step)) {
     const spec = stepper(step, u);
@@ -73,7 +86,12 @@ export function stepView(ctx: Ctx, value?: number, prefix = "", country: Country
     return {
       text: `${header}\n\n<pre>   ${spec.format(v)}   </pre>`,
       keyboard: [
-        spec.deltas.map((d) => btn(d > 0 ? `+${d}` : `−${-d}`, `ob:${step}:v:${clampStep(spec, v + d)}`)),
+        spec.deltas.map((d) =>
+          btn(
+            d > 0 ? `+${d}` : `−${-d}`,
+            `ob:${step}:v:${clampStep(spec, v + d)}`,
+          ),
+        ),
         [...footer.slice(0, -1), btn("Next ›", `ob:${step}:ok:${v}`)],
         [footer.at(-1)!],
       ],
@@ -81,13 +99,36 @@ export function stepView(ctx: Ctx, value?: number, prefix = "", country: Country
   }
 
   const options: Record<string, Button[][]> = {
-    units: [choose([["Metric  ·  kg, cm", "metric"], ["Imperial  ·  lb, ft", "imperial"]])],
-    sex: [choose([["Male", "male"], ["Female", "female"]])],
+    units: [
+      choose([
+        ["Metric  ·  kg, cm", "metric"],
+        ["Imperial  ·  lb, ft", "imperial"],
+      ]),
+    ],
+    sex: [
+      choose([
+        ["Male", "male"],
+        ["Female", "female"],
+      ]),
+    ],
     activity: Object.entries(ACTIVITY).map(([k, a]) => choose([[a.label, k]])),
-    objective: [choose([["Lose weight", "lose"], ["Maintain", "maintain"], ["Gain weight", "gain"]])],
-    pace: [paceOptions(u.units, u.objective).map((p) => btn(p.label, `ob:pace:${p.kg}`))],
+    objective: [
+      choose([
+        ["Lose weight", "lose"],
+        ["Maintain", "maintain"],
+        ["Gain weight", "gain"],
+      ]),
+    ],
+    pace: [
+      paceOptions(u.units, u.objective).map((p) =>
+        btn(p.label, `ob:pace:${p.kg}`),
+      ),
+    ],
     timezone: tzPicker("o", value ?? null, u.utcOffsetMinutes),
-    country: [...countryPicker("o", country), [btn("Skip this question", "ct:o:c:none")]],
+    country: [
+      ...countryPicker("o", country),
+      [btn("Skip this question", "ct:o:c:none")],
+    ],
   };
   return { text: header, keyboard: [...(options[step] ?? []), footer] };
 }
@@ -95,13 +136,27 @@ export function stepView(ctx: Ctx, value?: number, prefix = "", country: Country
 export async function saveKey(ctx: Ctx, key: string, messageId: number) {
   await telegram.deleteMessage(ctx.user.chatId, messageId);
   if (!looksLikeKey(key) || !(await isValidKey(key))) {
-    return ctx.send({ text: "OpenRouter didn't accept that key. Your message was deleted. Check the key and paste it again.", keyboard: [[link("Open openrouter.ai/keys", KEYS_URL)]] });
+    return ctx.send({
+      text: "OpenRouter didn't accept that key. Your message was deleted. Check the key and paste it again.",
+      keyboard: [[link("Open openrouter.ai/keys", KEYS_URL)]],
+    });
   }
   await ctx.db.keys.set(key);
   const firstSetup = ctx.user.onboardingStep === "key";
-  ctx.user = await ctx.db.users.update({ onboardingStep: stepAfterKey(ctx.user.onboardingStep, ctx.user.targetKcal != null) });
+  ctx.user = await ctx.db.users.update({
+    onboardingStep: stepAfterKey(
+      ctx.user.onboardingStep,
+      ctx.user.targetKcal != null,
+    ),
+  });
   if (firstSetup && ctx.user.onboardingStep === PROFILE_START) {
-    return ctx.send(stepView(ctx, undefined, "Key saved and your message deleted.\n\nNext, a few questions to set your daily goals.\n\n"));
+    return ctx.send(
+      stepView(
+        ctx,
+        undefined,
+        "Key saved and your message deleted.\n\nNext, a few questions to set your daily goals.\n\n",
+      ),
+    );
   }
   return ctx.send("Key saved and your message deleted.");
 }
@@ -113,17 +168,30 @@ export async function startProfile(ctx: Ctx): Promise<View> {
 
 async function advance(ctx: Ctx, patch: ProfilePatch): Promise<Reply> {
   const objective = patch.objective ?? ctx.user.objective;
-  ctx.user = await ctx.db.users.update({ ...patch, onboardingStep: nextStep(ctx.user.onboardingStep, objective) });
-  return ctx.user.onboardingStep === "done" ? finish(ctx) : { view: stepView(ctx) };
+  ctx.user = await ctx.db.users.update({
+    ...patch,
+    onboardingStep: nextStep(ctx.user.onboardingStep, objective),
+  });
+  return ctx.user.onboardingStep === "done"
+    ? finish(ctx)
+    : { view: stepView(ctx) };
 }
 
 /** Handles `ob:*` callbacks. */
-export async function onboardingAction(ctx: Ctx, args: string[]): Promise<Reply> {
+export async function onboardingAction(
+  ctx: Ctx,
+  args: string[],
+): Promise<Reply> {
   const [step, a, b] = args;
   if (step === "skip") {
     ctx.user = await ctx.db.users.update({ onboardingStep: "done" });
     await sendReplyKeyboard(ctx);
-    return { view: { text: "Setup skipped. You can finish it any time from Menu → Profile.", keyboard: [[btn("Today", "day:0"), btn("Menu", "menu")]] } };
+    return {
+      view: {
+        text: "Setup skipped. You can finish it any time from Menu → Profile.",
+        keyboard: [[btn("Today", "day:0"), btn("Menu", "menu")]],
+      },
+    };
   }
   if (step === "back") {
     const prev = prevStep(ctx.user.onboardingStep, ctx.user.objective);
@@ -131,7 +199,8 @@ export async function onboardingAction(ctx: Ctx, args: string[]): Promise<Reply>
     ctx.user = await ctx.db.users.update({ onboardingStep: prev });
     return { view: stepView(ctx) };
   }
-  if (step !== ctx.user.onboardingStep) return { toast: "That step was already answered" };
+  if (step !== ctx.user.onboardingStep)
+    return { toast: "That step was already answered" };
 
   if (isNumeric(step)) {
     const spec = stepper(step, ctx.user);
@@ -148,11 +217,21 @@ async function finish(ctx: Ctx): Promise<Reply> {
   const profile = completeProfile(ctx.user);
   if (profile) {
     const t = computeTargets(profile);
-    ctx.user = await ctx.db.users.update({ targetKcal: t.kcal, targetProteinG: t.protein_g, targetCarbsG: t.carbs_g, targetFatG: t.fat_g });
+    ctx.user = await ctx.db.users.update({
+      targetKcal: t.kcal,
+      targetProteinG: t.protein_g,
+      targetCarbsG: t.carbs_g,
+      targetFatG: t.fat_g,
+    });
   }
   await sendReplyKeyboard(ctx);
   if (!profile) {
-    return { view: { text: "Setup saved, but some answers are missing, so no goals were set.", keyboard: [[btn("Profile", "prof"), btn("Today", "day:0")]] } };
+    return {
+      view: {
+        text: "Setup saved, but some answers are missing, so no goals were set.",
+        keyboard: [[btn("Profile", "prof"), btn("Today", "day:0")]],
+      },
+    };
   }
   return {
     view: {
@@ -163,5 +242,9 @@ async function finish(ctx: Ctx): Promise<Reply> {
 }
 
 function sendReplyKeyboard(ctx: Ctx) {
-  return telegram.sendWithReplyKeyboard(ctx.user.chatId, "Use the buttons below to open Today, History or the Menu.", REPLY_KEYBOARD);
+  return telegram.sendWithReplyKeyboard(
+    ctx.user.chatId,
+    "Use the buttons below to open Today, History or the Menu.",
+    REPLY_KEYBOARD,
+  );
 }

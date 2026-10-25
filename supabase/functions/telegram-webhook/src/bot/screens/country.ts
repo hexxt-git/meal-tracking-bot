@@ -1,4 +1,9 @@
-import { COUNTRY_LETTERS, COUNTRY_PAGE_SIZE, countriesByLetter, countryName } from "../../domain/countries.ts";
+import {
+  COUNTRY_LETTERS,
+  COUNTRY_PAGE_SIZE,
+  countriesByLetter,
+  countryName,
+} from "../../domain/countries.ts";
 import { parseChoice } from "../../domain/onboarding.ts";
 import type { Button, Keyboard } from "../../telegram/types.ts";
 import type { Ctx } from "../context.ts";
@@ -18,25 +23,48 @@ export const COUNTRY_QUESTION =
 
 export function countryPicker(mode: CountryMode, nav: CountryNav): Keyboard {
   if (!nav || !COUNTRY_LETTERS.includes(nav.letter)) {
-    return rows(COUNTRY_LETTERS.map((l) => btn(l, `ct:${mode}:l:${l}:0`)), 6);
+    return rows(
+      COUNTRY_LETTERS.map((l) => btn(l, `ct:${mode}:l:${l}:0`)),
+      6,
+    );
   }
   const all = countriesByLetter(nav.letter);
   const pages = Math.ceil(all.length / COUNTRY_PAGE_SIZE);
   const page = Math.min(pages - 1, Math.max(0, nav.page));
-  const shown = all.slice(page * COUNTRY_PAGE_SIZE, (page + 1) * COUNTRY_PAGE_SIZE);
+  const shown = all.slice(
+    page * COUNTRY_PAGE_SIZE,
+    (page + 1) * COUNTRY_PAGE_SIZE,
+  );
   const navRow: Button[] = [
     btn("‹ Letters", `ct:${mode}`),
-    ...(page > 0 ? [btn("‹ Prev", `ct:${mode}:l:${nav.letter}:${page - 1}`)] : []),
-    ...(page < pages - 1 ? [btn("More ›", `ct:${mode}:l:${nav.letter}:${page + 1}`)] : []),
+    ...(page > 0
+      ? [btn("‹ Prev", `ct:${mode}:l:${nav.letter}:${page - 1}`)]
+      : []),
+    ...(page < pages - 1
+      ? [btn("More ›", `ct:${mode}:l:${nav.letter}:${page + 1}`)]
+      : []),
   ];
-  return [...rows(shown.map(([code, name]) => btn(name, `ct:${mode}:c:${code}`)), 2), navRow];
+  return [
+    ...rows(
+      shown.map(([code, name]) => btn(name, `ct:${mode}:c:${code}`)),
+      2,
+    ),
+    navRow,
+  ];
 }
 
-export async function countryAction(ctx: Ctx, [mode, kind, a, b]: string[]): Promise<Reply> {
-  const nav: CountryNav = kind === "l" ? { letter: a, page: Number(b) || 0 } : null;
+export async function countryAction(
+  ctx: Ctx,
+  [mode, kind, a, b]: string[],
+): Promise<Reply> {
+  const nav: CountryNav =
+    kind === "l" ? { letter: a, page: Number(b) || 0 } : null;
   if (mode === "o") {
-    if (ctx.user.onboardingStep !== "country") return { toast: "That step was already answered" };
-    return kind === "c" ? onboardingAction(ctx, ["country", a]) : { view: stepView(ctx, undefined, "", nav) };
+    if (ctx.user.onboardingStep !== "country")
+      return { toast: "That step was already answered" };
+    return kind === "c"
+      ? onboardingAction(ctx, ["country", a])
+      : { view: stepView(ctx, undefined, "", nav) };
   }
   if (kind === "c") {
     const patch = parseChoice("country", a, ctx.user);

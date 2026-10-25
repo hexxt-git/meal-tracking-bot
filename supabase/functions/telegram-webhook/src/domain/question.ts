@@ -35,12 +35,20 @@ export type Job = {
 /** A job that failed or was stopped by the daily budget, behind a Retry or Continue button with this id. */
 export type SavedRun = Job & { id: string };
 
-export const isOpen = (q: PendingQuestion | null, now: number, ttlMs: number): q is PendingQuestion =>
-  q != null && now - Date.parse(q.askedAt) < ttlMs;
+export const isOpen = (
+  q: PendingQuestion | null,
+  now: number,
+  ttlMs: number,
+): q is PendingQuestion => q != null && now - Date.parse(q.askedAt) < ttlMs;
 
 export const newQuestionId = () => crypto.randomUUID().slice(0, 8);
 
-const normalized = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const normalized = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 
 /** Edits that only change case, punctuation or spacing don't change what the message says. */
-export const isMeaningfulEdit = (before: string, after: string) => normalized(before) !== normalized(after);
+export const isMeaningfulEdit = (before: string, after: string) =>
+  normalized(before) !== normalized(after);

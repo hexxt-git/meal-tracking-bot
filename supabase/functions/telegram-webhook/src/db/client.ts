@@ -17,7 +17,9 @@ export type Run = <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>;
 export function userRunner(tgId: number): Run {
   return (fn) =>
     db.transaction(async (tx) => {
-      await tx.execute(sql`select set_config('app.tg_id', ${String(tgId)}, true)`);
+      await tx.execute(
+        sql`select set_config('app.tg_id', ${String(tgId)}, true)`,
+      );
       await tx.execute(sql`set local role bot_user`);
       return await fn(tx);
     });

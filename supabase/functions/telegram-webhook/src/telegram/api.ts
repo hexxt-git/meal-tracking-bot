@@ -4,24 +4,40 @@ import type { Keyboard } from "./types.ts";
 const API = `https://api.telegram.org/bot${config.telegramToken}`;
 
 // deno-lint-ignore no-explicit-any
-async function call<T = any>(method: string, body: Record<string, unknown> | FormData): Promise<T> {
-  const init = body instanceof FormData
-    ? { method: "POST", body }
-    : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+async function call<T = any>(
+  method: string,
+  body: Record<string, unknown> | FormData,
+): Promise<T> {
+  const init =
+    body instanceof FormData
+      ? { method: "POST", body }
+      : {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        };
   const json = await (await fetch(`${API}/${method}`, init)).json();
   if (!json.ok) throw new Error(`${method}: ${json.description}`);
   return json.result;
 }
 
-const markup = (keyboard?: Keyboard) => (keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {});
+const markup = (keyboard?: Keyboard) =>
+  keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {};
 
-const isNotModified = (e: unknown) => e instanceof Error && e.message.includes("message is not modified");
+const isNotModified = (e: unknown) =>
+  e instanceof Error && e.message.includes("message is not modified");
 
 export const telegram = {
   call,
 
   send: (chatId: number, html: string, keyboard?: Keyboard) =>
-    call("sendMessage", { chat_id: chatId, text: html, parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...markup(keyboard) }),
+    call("sendMessage", {
+      chat_id: chatId,
+      text: html,
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+      ...markup(keyboard),
+    }),
 
   /** Sends with a persistent reply keyboard under the input field. Each inner array is one row of button labels. */
   sendWithReplyKeyboard: (chatId: number, html: string, rows: string[][]) =>
@@ -29,10 +45,19 @@ export const telegram = {
       chat_id: chatId,
       text: html,
       parse_mode: "HTML",
-      reply_markup: { keyboard: rows.map((r) => r.map((text) => ({ text }))), resize_keyboard: true, is_persistent: true },
+      reply_markup: {
+        keyboard: rows.map((r) => r.map((text) => ({ text }))),
+        resize_keyboard: true,
+        is_persistent: true,
+      },
     }),
 
-  edit: (chatId: number, messageId: number, html: string, keyboard: Keyboard = []) =>
+  edit: (
+    chatId: number,
+    messageId: number,
+    html: string,
+    keyboard: Keyboard = [],
+  ) =>
     call("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
@@ -44,15 +69,31 @@ export const telegram = {
       if (!isNotModified(e)) throw e;
     }),
 
-  answerCallback: (id: string, text?: string) => call("answerCallbackQuery", { callback_query_id: id, ...(text && { text }) }),
+  answerCallback: (id: string, text?: string) =>
+    call("answerCallbackQuery", {
+      callback_query_id: id,
+      ...(text && { text }),
+    }),
 
-  deleteMessage: (chatId: number, messageId: number) => call("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(() => {}),
+  deleteMessage: (chatId: number, messageId: number) =>
+    call("deleteMessage", { chat_id: chatId, message_id: messageId }).catch(
+      () => {},
+    ),
 
-  typing: (chatId: number) => call("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {}),
+  typing: (chatId: number) =>
+    call("sendChatAction", { chat_id: chatId, action: "typing" }).catch(
+      () => {},
+    ),
 
-  leave: (chatId: number) => call("leaveChat", { chat_id: chatId }).catch(() => {}),
+  leave: (chatId: number) =>
+    call("leaveChat", { chat_id: chatId }).catch(() => {}),
 
-  sendDocument: (chatId: number, filename: string, content: string, mime: string) => {
+  sendDocument: (
+    chatId: number,
+    filename: string,
+    content: string,
+    mime: string,
+  ) => {
     const form = new FormData();
     form.set("chat_id", String(chatId));
     form.set("document", new Blob([content], { type: mime }), filename);
@@ -60,11 +101,16 @@ export const telegram = {
   },
 
   async download(fileId: string): Promise<Uint8Array> {
-    const file = await call<{ file_path: string }>("getFile", { file_id: fileId });
-    const res = await fetch(`https://api.telegram.org/file/bot${config.telegramToken}/${file.file_path}`);
+    const file = await call<{ file_path: string }>("getFile", {
+      file_id: fileId,
+    });
+    const res = await fetch(
+      `https://api.telegram.org/file/bot${config.telegramToken}/${file.file_path}`,
+    );
     if (!res.ok) throw new Error(`download failed: ${res.status}`);
     return new Uint8Array(await res.arrayBuffer());
   },
 };
 
-export const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+export const esc = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

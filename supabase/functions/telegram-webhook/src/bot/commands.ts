@@ -1,15 +1,37 @@
 import { telegram } from "../telegram/api.ts";
 import type { Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
-import { accountAction, helpView, menuView, profileView, settingsTimezone, settingsView } from "./screens/account.ts";
+import {
+  accountAction,
+  helpView,
+  menuView,
+  profileView,
+  settingsTimezone,
+  settingsView,
+} from "./screens/account.ts";
 import { goalsView } from "./screens/goals.ts";
-import { dayView, exportCsv, historyView, weekView } from "./screens/journal.ts";
-import { keyPromptView, saveKey, stepView, welcomeView } from "./screens/onboarding.ts";
+import {
+  dayView,
+  exportCsv,
+  historyView,
+  weekView,
+} from "./screens/journal.ts";
+import {
+  keyPromptView,
+  saveKey,
+  stepView,
+  welcomeView,
+} from "./screens/onboarding.ts";
 import { LOG_HINT, REPLY_KEYBOARD, REPLY_KEYS, Reply, View } from "./ui.ts";
 
-type Command = (ctx: Ctx, args: string, msg: Message) => Promise<unknown> | unknown;
+type Command = (
+  ctx: Ctx,
+  args: string,
+  msg: Message,
+) => Promise<unknown> | unknown;
 
-const show = (ctx: Ctx, view: View | Promise<View>) => Promise.resolve(view).then(ctx.send);
+const show = (ctx: Ctx, view: View | Promise<View>) =>
+  Promise.resolve(view).then(ctx.send);
 
 /** Sends a callback-style reply as a new message (commands have no message to edit). */
 async function showReply(ctx: Ctx, reply: Promise<Reply>) {
@@ -23,7 +45,11 @@ const COMMANDS: Record<string, Command> = {
   start: (ctx) => {
     if (ctx.user.onboardingStep === "key") return ctx.send(welcomeView());
     if (ctx.user.onboardingStep !== "done") return ctx.send(stepView(ctx));
-    return telegram.sendWithReplyKeyboard(ctx.user.chatId, `Welcome back. ${LOG_HINT}`, REPLY_KEYBOARD);
+    return telegram.sendWithReplyKeyboard(
+      ctx.user.chatId,
+      `Welcome back. ${LOG_HINT}`,
+      REPLY_KEYBOARD,
+    );
   },
   menu: (ctx) => show(ctx, menuView()),
   help: (ctx) => show(ctx, helpView()),
@@ -35,7 +61,8 @@ const COMMANDS: Record<string, Command> = {
   settings: (ctx) => show(ctx, settingsView(ctx)),
   timezone: (ctx) => showReply(ctx, settingsTimezone(ctx, ["p", "-1"])),
   export: (ctx) => showReply(ctx, exportCsv(ctx)),
-  setkey: (ctx, args, msg) => (args ? saveKey(ctx, args, msg.message_id) : ctx.send(keyPromptView())),
+  setkey: (ctx, args, msg) =>
+    args ? saveKey(ctx, args, msg.message_id) : ctx.send(keyPromptView()),
   deleteaccount: (ctx) => showReply(ctx, accountAction(ctx, [])),
 };
 

@@ -1,8 +1,16 @@
 // The subset of Bot API types this bot reads.
 
-export type Chat = { id: number; type: "private" | "group" | "supergroup" | "channel" };
+export type Chat = {
+  id: number;
+  type: "private" | "group" | "supergroup" | "channel";
+};
 export type From = { id: number; first_name?: string };
-export type FileRef = { file_id: string; mime_type?: string; file_name?: string; file_size?: number };
+export type FileRef = {
+  file_id: string;
+  mime_type?: string;
+  file_name?: string;
+  file_size?: number;
+};
 
 export type Message = {
   message_id: number;
@@ -36,5 +44,6 @@ export type Update = {
   my_chat_member?: { chat: Chat; from: From };
 };
 
-export type Button = { text: string; callback_data: string } | { text: string; url: string };
+export type Button =
+  { text: string; callback_data: string } | { text: string; url: string };
 export type Keyboard = Button[][];

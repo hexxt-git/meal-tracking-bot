@@ -8,4 +8,5 @@ const TEXTS: Record<number, string> = {
   48: "Nothing logged for 2 days. This is the last reminder until you log a meal again. Reminders can be turned off in Settings.",
 };
 
-export const reminderText = (hours: number) => TEXTS[hours] ?? `No meal logged in ${hours} hours.`;
+export const reminderText = (hours: number) =>
+  TEXTS[hours] ?? `No meal logged in ${hours} hours.`;

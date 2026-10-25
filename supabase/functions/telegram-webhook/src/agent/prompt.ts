@@ -17,16 +17,30 @@ export type PromptContext = {
   canResearch: boolean;
   /** Ids of this message's photos. */
   photoIds: string[];
-  edit?: { before: string | null; after: string; sentAt: string; meals: unknown[] };
-  history: { who: "User" | "You"; at: string; text: string; attachments: string[] }[];
+  edit?: {
+    before: string | null;
+    after: string;
+    sentAt: string;
+    meals: unknown[];
+  };
+  history: {
+    who: "User" | "You";
+    at: string;
+    text: string;
+    attachments: string[];
+  }[];
 };
 
 function transcript(history: PromptContext["history"]): string {
-  return history.map((h) => {
-    const extra = h.attachments.length ? ` [${h.attachments.join(", ")}]` : "";
-    const text = h.text.replace(/\s+/g, " ").trim().slice(0, 600);
-    return `[${h.at}] ${h.who}: ${text || "(no text)"}${extra}`;
-  }).join("\n");
+  return history
+    .map((h) => {
+      const extra = h.attachments.length
+        ? ` [${h.attachments.join(", ")}]`
+        : "";
+      const text = h.text.replace(/\s+/g, " ").trim().slice(0, 600);
+      return `[${h.at}] ${h.who}: ${text || "(no text)"}${extra}`;
+    })
+    .join("\n");
 }
 
 export function systemPrompt(c: PromptContext): string {
@@ -41,7 +55,7 @@ export function systemPrompt(c: PromptContext): string {
 
   const asking = c.canAsk
     ? `ASKING (only when strictly necessary)
-- Call ask_user only when an unknown would change calories by more than about a third (or 150 kcal) and no reasonable default exists, e.g. how much of a large bag or shared plate was eaten. Otherwise assume the likely answer and state it.
+- Call ask_user only when an unknown would change calories by more than about 20% (or 100 kcal) and no reasonable default exists, e.g. how much of a large bag or shared plate was eaten. Otherwise assume the likely answer and state it.
 - Research first, then ask, before logging anything. 2 to 4 short options (max 30 characters each); the user can also type an answer.`
     : `ASKING
 - No more questions for this message. Make the most reasonable assumption and state it.`;
@@ -87,12 +101,16 @@ RECENT CONVERSATION (oldest first; photos and voice notes are not included, only
 ${c.history.length ? transcript(c.history) : "(none)"}
 
 MEALS LOGGED IN THE LAST ${EDIT_WINDOW_HOURS} H (most recent first): ${JSON.stringify(c.recentMeals)}${
-    c.fixMeal ? `\n\nThe user tapped "Fix" on this meal, so the message is probably about it: ${JSON.stringify(c.fixMeal)}` : ""
+    c.fixMeal
+      ? `\n\nThe user tapped "Fix" on this meal, so the message is probably about it: ${JSON.stringify(c.fixMeal)}`
+      : ""
   }${
     c.edit
       ? `\n\nEDITED MESSAGE: the user edited a message they sent at ${c.edit.sentAt}. This run is about that edit, not a new message.\n- Before: ${
-        c.edit.before === null ? "(original text not available)" : JSON.stringify(c.edit.before)
-      }\n- After: ${JSON.stringify(c.edit.after)}\n- Meals that message logged or changed: ${JSON.stringify(c.edit.meals)}\nIf the edit changes what was eaten, how much or when, update those meals (or log/delete) to match the new text. If it changes nothing that matters, change nothing and reply in one short sentence. If no meals are listed, check the meals logged in the last day before logging anything, so nothing is logged twice.`
+          c.edit.before === null
+            ? "(original text not available)"
+            : JSON.stringify(c.edit.before)
+        }\n- After: ${JSON.stringify(c.edit.after)}\n- Meals that message logged or changed: ${JSON.stringify(c.edit.meals)}\nIf the edit changes what was eaten, how much or when, update those meals (or log/delete) to match the new text. If it changes nothing that matters, change nothing and reply in one short sentence. If no meals are listed, check the meals logged in the last day before logging anything, so nothing is logged twice.`
       : ""
   }${c.answers.length ? `\n\nYou already asked about this message:\n${c.answers.map((a) => `- Q: ${a.question}\n  A: ${a.answer}`).join("\n")}` : ""}`;
 }

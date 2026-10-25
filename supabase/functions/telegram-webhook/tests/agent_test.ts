@@ -2,20 +2,48 @@ import { assertEquals } from "@std/assert";
 import { systemPrompt } from "../src/agent/prompt.ts";
 import { RunState } from "../src/agent/tools.ts";
 import type { Meal } from "../src/db/index.ts";
-import { COUNTRY_LETTERS, countriesByLetter, countryName } from "../src/domain/countries.ts";
+import {
+  COUNTRY_LETTERS,
+  countriesByLetter,
+  countryName,
+} from "../src/domain/countries.ts";
 import { parseCsv, parseMealsCsv, toCsv } from "../src/domain/csv.ts";
 import { isEditable } from "../src/domain/meal.ts";
-import { nextStep, parseChoice, PROFILE_STEPS } from "../src/domain/onboarding.ts";
+import {
+  nextStep,
+  parseChoice,
+  PROFILE_STEPS,
+} from "../src/domain/onboarding.ts";
 import { isMeaningfulEdit } from "../src/domain/question.ts";
 import { parseProviderError } from "../src/services/openrouter-error.ts";
 
 const meal = (id: string, kcal: number): Meal => ({
-  id, tgId: 1, eatenAt: new Date(0), loggedAt: new Date(0), description: id, userNote: null, items: [], kcal,
-  proteinG: 0, carbsG: 0, fatG: 0, photoFileIds: [], sourceMessageId: null, createdAt: new Date(0), updatedAt: new Date(0),
+  id,
+  tgId: 1,
+  eatenAt: new Date(0),
+  loggedAt: new Date(0),
+  description: id,
+  userNote: null,
+  items: [],
+  kcal,
+  proteinG: 0,
+  carbsG: 0,
+  fatG: 0,
+  photoFileIds: [],
+  sourceMessageId: null,
+  createdAt: new Date(0),
+  updatedAt: new Date(0),
 });
 
 Deno.test("run changes fold into their net effect", () => {
-  const run = new RunState({ store: {} as never, offsetMin: 0, sentAt: new Date(), userText: null, fileIds: [], messageId: 1 });
+  const run = new RunState({
+    store: {} as never,
+    offsetMin: 0,
+    sentAt: new Date(),
+    userText: null,
+    fileIds: [],
+    messageId: 1,
+  });
   run.record("created", meal("a", 100));
   run.record("updated", meal("a", 150), meal("a", 100));
   run.record("updated", meal("b", 300), meal("b", 200));
@@ -23,10 +51,13 @@ Deno.test("run changes fold into their net effect", () => {
   run.record("created", meal("c", 50));
   run.record("deleted", meal("c", 50), meal("c", 50));
   const changes = [...run.changes.values()];
-  assertEquals(changes.map((c) => [c.kind, c.meal.id, c.meal.kcal, c.before?.kcal]), [
-    ["created", "a", 150, undefined],
-    ["updated", "b", 350, 200],
-  ]);
+  assertEquals(
+    changes.map((c) => [c.kind, c.meal.id, c.meal.kcal, c.before?.kcal]),
+    [
+      ["created", "a", 150, undefined],
+      ["updated", "b", 350, 200],
+    ],
+  );
 });
 
 Deno.test("edit window is 24 hours from logging", () => {
@@ -39,19 +70,55 @@ Deno.test("country step comes last and validates codes", () => {
   assertEquals(PROFILE_STEPS.at(-1), "country");
   assertEquals(nextStep("timezone", "lose"), "country");
   assertEquals(nextStep("country", "lose"), "done");
-  const state = { units: "metric", sex: null, age: null, heightCm: null, weightKg: null, activity: null, objective: null, paceKgPerWeek: null } as const;
+  const state = {
+    units: "metric",
+    sex: null,
+    age: null,
+    heightCm: null,
+    weightKg: null,
+    activity: null,
+    objective: null,
+    paceKgPerWeek: null,
+  } as const;
   assertEquals(parseChoice("country", "DZ", state), { country: "DZ" });
   assertEquals(parseChoice("country", "none", state), { country: null });
   assertEquals(parseChoice("country", "XX", state), null);
   assertEquals(countryName("DZ"), "Algeria");
-  assertEquals(countriesByLetter("A").some(([c]) => c === "AX"), true);
-  assertEquals(COUNTRY_LETTERS.every((l) => countriesByLetter(l).length > 0), true);
+  assertEquals(
+    countriesByLetter("A").some(([c]) => c === "AX"),
+    true,
+  );
+  assertEquals(
+    COUNTRY_LETTERS.every((l) => countriesByLetter(l).length > 0),
+    true,
+  );
 });
 
 Deno.test("csv export round-trips through import", () => {
-  const items = [{ name: 'Yogurt, "Greek"', portion: "100 g", kcal: 137, protein_g: 3.2, carbs_g: 17.1, fat_g: 6.2 }];
+  const items = [
+    {
+      name: 'Yogurt, "Greek"',
+      portion: "100 g",
+      kcal: 137,
+      protein_g: 3.2,
+      carbs_g: 17.1,
+      fat_g: 6.2,
+    },
+  ];
   const csv = toCsv([
-    ["2026-10-19T08:00:00.000Z", "Mon 19 Oct", "09:00", "2026-10-19T09:30:00.000Z", "Breakfast, sweet", 137, 3.2, 17.1, 6.2, JSON.stringify(items), "line 1\nline 2"],
+    [
+      "2026-10-19T08:00:00.000Z",
+      "Mon 19 Oct",
+      "09:00",
+      "2026-10-19T09:30:00.000Z",
+      "Breakfast, sweet",
+      137,
+      3.2,
+      17.1,
+      6.2,
+      JSON.stringify(items),
+      "line 1\nline 2",
+    ],
     ["not a date", "", "", "", "Bad", 1, 1, 1, 1, "[]", ""],
   ]);
   const r = parseMealsCsv(csv);
@@ -67,45 +134,87 @@ Deno.test("csv export round-trips through import", () => {
 });
 
 Deno.test("csv import accepts older exports and rejects other files", () => {
-  const old = 'eaten_at_utc,eaten_local_date,eaten_local_time,description,kcal,protein_g,carbs_g,fat_g,items,note\r\n"2026-10-01T12:00:00Z","","","Lunch","500","30","50","20","not json",""\r\n';
+  const old =
+    'eaten_at_utc,eaten_local_date,eaten_local_time,description,kcal,protein_g,carbs_g,fat_g,items,note\r\n"2026-10-01T12:00:00Z","","","Lunch","500","30","50","20","not json",""\r\n';
   const r = parseMealsCsv(old);
-  assertEquals(r.ok && [r.meals[0].loggedAt.toISOString(), r.meals[0].items.length], ["2026-10-01T12:00:00.000Z", 0]);
+  assertEquals(
+    r.ok && [r.meals[0].loggedAt.toISOString(), r.meals[0].items.length],
+    ["2026-10-01T12:00:00.000Z", 0],
+  );
   const bad = parseMealsCsv("name,calories\napple,95");
   assertEquals(bad.ok, false);
   assertEquals(parseCsv('a,"b ""c""",d\n'), [["a", 'b "c"', "d"]]);
 });
 
 Deno.test("only edits that change words count", () => {
-  assertEquals(isMeaningfulEdit("2 eggs and toast", "2 Eggs, and toast!"), false);
+  assertEquals(
+    isMeaningfulEdit("2 eggs and toast", "2 Eggs, and toast!"),
+    false,
+  );
   assertEquals(isMeaningfulEdit("2 eggs and toast", "3 eggs and toast"), true);
   assertEquals(isMeaningfulEdit("café au lait", "cafe au lait"), true);
 });
 
-Deno.test("prompt carries the recent conversation, oldest first, with attachments marked", () => {
-  const prompt = systemPrompt({
-    now: "Mon 2026-10-19 20:00", nowIso: "2026-10-19T20:00:00+01:00", offset: "+01:00", country: "Algeria", units: "metric",
-    targets: null, recentMeals: [], fixMeal: null, answers: [], canAsk: true, canResearch: true, photoIds: [],
-    history: [
-      { who: "User", at: "Mon 2026-10-19 19:58", text: "is white rice\nok before the gym?", attachments: [] },
-      { who: "You", at: "Mon 2026-10-19 19:58", text: "Yes, it digests fast.", attachments: [] },
-      { who: "User", at: "Mon 2026-10-19 19:59", text: "", attachments: ["photo"] },
-    ],
-  });
-  const block = prompt.slice(prompt.indexOf("RECENT CONVERSATION ("));
-  const lines = block.split("\n").slice(1, 4);
-  assertEquals(lines, [
-    "[Mon 2026-10-19 19:58] User: is white rice ok before the gym?",
-    "[Mon 2026-10-19 19:58] You: Yes, it digests fast.",
-    "[Mon 2026-10-19 19:59] User: (no text) [photo]",
-  ]);
-});
+Deno.test(
+  "prompt carries the recent conversation, oldest first, with attachments marked",
+  () => {
+    const prompt = systemPrompt({
+      now: "Mon 2026-10-19 20:00",
+      nowIso: "2026-10-19T20:00:00+01:00",
+      offset: "+01:00",
+      country: "Algeria",
+      units: "metric",
+      targets: null,
+      recentMeals: [],
+      fixMeal: null,
+      answers: [],
+      canAsk: true,
+      canResearch: true,
+      photoIds: [],
+      history: [
+        {
+          who: "User",
+          at: "Mon 2026-10-19 19:58",
+          text: "is white rice\nok before the gym?",
+          attachments: [],
+        },
+        {
+          who: "You",
+          at: "Mon 2026-10-19 19:58",
+          text: "Yes, it digests fast.",
+          attachments: [],
+        },
+        {
+          who: "User",
+          at: "Mon 2026-10-19 19:59",
+          text: "",
+          attachments: ["photo"],
+        },
+      ],
+    });
+    const block = prompt.slice(prompt.indexOf("RECENT CONVERSATION ("));
+    const lines = block.split("\n").slice(1, 4);
+    assertEquals(lines, [
+      "[Mon 2026-10-19 19:58] User: is white rice ok before the gym?",
+      "[Mon 2026-10-19 19:58] You: Yes, it digests fast.",
+      "[Mon 2026-10-19 19:59] User: (no text) [photo]",
+    ]);
+  },
+);
 
 Deno.test("provider errors worth retrying", () => {
   const transient = (m: string) => parseProviderError(m).transient;
   assertEquals(transient("The operation was aborted"), true);
   assertEquals(transient('502: {"message":"Provider returned error"}'), true);
   assertEquals(transient('429: {"message":"Rate limited"}'), true);
-  assertEquals(transient('403: {"message":"Key limit exceeded (daily limit)"}'), false);
+  assertEquals(
+    transient('403: {"message":"Key limit exceeded (daily limit)"}'),
+    false,
+  );
   assertEquals(transient('401: {"message":"User not found"}'), false);
-  assertEquals(parseProviderError('403: {"message":"Key limit exceeded (daily limit)"}').message, "Key limit exceeded (daily limit)");
+  assertEquals(
+    parseProviderError('403: {"message":"Key limit exceeded (daily limit)"}')
+      .message,
+    "Key limit exceeded (daily limit)",
+  );
 });

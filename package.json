@@ -9,10 +9,21 @@
     "db:push": "supabase db push",
     "deploy": "supabase functions deploy telegram-webhook --no-verify-jwt --use-api",
     "secrets:set": "supabase secrets set --env-file supabase/.env",
-    "setup:bot": "deno run --env-file=.env --allow-env --allow-net --allow-read scripts/setup-bot.ts"
+    "setup:bot": "deno run --env-file=.env --allow-env --allow-net --allow-read scripts/setup-bot.ts",
+    "format": "prettier --write .",
+    "prepare": "simple-git-hooks"
   },
   "devDependencies": {
     "deno": "^2.9.6",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.10",
+    "simple-git-hooks": "^2.14.0",
     "supabase": "^2.121.0"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "bunx lint-staged"
+  },
+  "lint-staged": {
+    "*": "prettier --write --ignore-unknown"
   }
 }

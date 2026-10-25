@@ -39,21 +39,41 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 export function profileView(ctx: Ctx): View {
   const u = ctx.user;
   const imperial = u.units === "imperial";
-  const height = u.heightCm == null ? "–" : imperial
-    ? `${Math.floor(Math.round(u.heightCm / 2.54) / 12)}'${Math.round(u.heightCm / 2.54) % 12}"`
-    : `${Math.round(u.heightCm)} cm`;
-  const weight = u.weightKg == null ? "–" : imperial ? `${Math.round(u.weightKg * LB_PER_KG)} lb` : `${u.weightKg.toFixed(1)} kg`;
-  const pace = u.paceKgPerWeek ? (imperial ? `${(u.paceKgPerWeek * LB_PER_KG).toFixed(1)} lb/wk` : `${u.paceKgPerWeek} kg/wk`) : "";
-  const goal = u.objective ? `${cap(u.objective)}${u.objective !== "maintain" && pace ? ` ${pace}` : ""}` : "–";
+  const height =
+    u.heightCm == null
+      ? "–"
+      : imperial
+        ? `${Math.floor(Math.round(u.heightCm / 2.54) / 12)}'${Math.round(u.heightCm / 2.54) % 12}"`
+        : `${Math.round(u.heightCm)} cm`;
+  const weight =
+    u.weightKg == null
+      ? "–"
+      : imperial
+        ? `${Math.round(u.weightKg * LB_PER_KG)} lb`
+        : `${u.weightKg.toFixed(1)} kg`;
+  const pace = u.paceKgPerWeek
+    ? imperial
+      ? `${(u.paceKgPerWeek * LB_PER_KG).toFixed(1)} lb/wk`
+      : `${u.paceKgPerWeek} kg/wk`
+    : "";
+  const goal = u.objective
+    ? `${cap(u.objective)}${u.objective !== "maintain" && pace ? ` ${pace}` : ""}`
+    : "–";
   return {
-    text: `<b>Profile</b>\n\n${table([
-      ["Sex", u.sex ? cap(u.sex) : "–"],
-      ["Age", u.age ? String(u.age) : "–"],
-      ["Height", height],
-      ["Weight", weight],
-      ["Activity", u.activity ? ACTIVITY[u.activity].label.split(" (")[0] : "–"],
-      ["Goal", goal],
-    ], ["l", "l"])}Editing your profile recalculates your daily goals.`,
+    text: `<b>Profile</b>\n\n${table(
+      [
+        ["Sex", u.sex ? cap(u.sex) : "–"],
+        ["Age", u.age ? String(u.age) : "–"],
+        ["Height", height],
+        ["Weight", weight],
+        [
+          "Activity",
+          u.activity ? ACTIVITY[u.activity].label.split(" (")[0] : "–",
+        ],
+        ["Goal", goal],
+      ],
+      ["l", "l"],
+    )}Editing your profile recalculates your daily goals.`,
     keyboard: [[btn("Edit profile", "prof:edit")], [btn("‹ Menu", "menu")]],
   };
 }
@@ -63,18 +83,32 @@ export async function settingsView(ctx: Ctx): Promise<View> {
   const hasKey = (await ctx.db.keys.get()) != null;
   const other = u.units === "metric" ? "imperial" : "metric";
   return {
-    text: `<b>Settings</b>\n\n${table([
-      ["Units", cap(u.units)],
-      ["Timezone", `${fmtOffset(u.utcOffsetMinutes)}  (now ${localTime(new Date(), u.utcOffsetMinutes).slice(11)})`],
-      ["Country", countryName(u.country) ?? "Not set"],
-      ["Reminders", u.remindersEnabled ? "On" : "Off"],
-      ["API key", hasKey ? "Saved" : "Not set"],
-    ], ["l", "l"])}`,
+    text: `<b>Settings</b>\n\n${table(
+      [
+        ["Units", cap(u.units)],
+        [
+          "Timezone",
+          `${fmtOffset(u.utcOffsetMinutes)}  (now ${localTime(new Date(), u.utcOffsetMinutes).slice(11)})`,
+        ],
+        ["Country", countryName(u.country) ?? "Not set"],
+        ["Reminders", u.remindersEnabled ? "On" : "Off"],
+        ["API key", hasKey ? "Saved" : "Not set"],
+      ],
+      ["l", "l"],
+    )}`,
     keyboard: [
       [btn(`Switch to ${other}`, `units:${other}`)],
       [btn("Change timezone", "tz:s:p:-1"), btn("Change country", "ct:s")],
-      [btn(u.remindersEnabled ? "Turn reminders off" : "Turn reminders on", `rem:${u.remindersEnabled ? "off" : "on"}`)],
-      [btn(hasKey ? "Replace API key" : "Add API key", "key:new"), ...(hasKey ? [btn("Remove API key", "key:rm")] : [])],
+      [
+        btn(
+          u.remindersEnabled ? "Turn reminders off" : "Turn reminders on",
+          `rem:${u.remindersEnabled ? "off" : "on"}`,
+        ),
+      ],
+      [
+        btn(hasKey ? "Replace API key" : "Add API key", "key:new"),
+        ...(hasKey ? [btn("Remove API key", "key:rm")] : []),
+      ],
       [btn("Delete account", "acct")],
       [btn("‹ Menu", "menu")],
     ],
@@ -82,10 +116,16 @@ export async function settingsView(ctx: Ctx): Promise<View> {
 }
 
 /** `rem:on` / `rem:off` */
-export async function setReminders(ctx: Ctx, [state]: string[]): Promise<Reply> {
+export async function setReminders(
+  ctx: Ctx,
+  [state]: string[],
+): Promise<Reply> {
   if (state !== "on" && state !== "off") return {};
   ctx.user = await ctx.db.users.update({ remindersEnabled: state === "on" });
-  return { view: await settingsView(ctx), toast: state === "on" ? "Reminders on" : "Reminders off" };
+  return {
+    view: await settingsView(ctx),
+    toast: state === "on" ? "Reminders on" : "Reminders off",
+  };
 }
 
 export async function setUnits(ctx: Ctx, [units]: string[]): Promise<Reply> {
@@ -95,13 +135,19 @@ export async function setUnits(ctx: Ctx, [units]: string[]): Promise<Reply> {
 }
 
 /** `tz:s:p:<page>` shows the picker; `tz:s:<offset>` saves. Onboarding picks (`tz:o:*`) are routed to onboarding. */
-export async function settingsTimezone(ctx: Ctx, [a, b]: string[]): Promise<Reply> {
+export async function settingsTimezone(
+  ctx: Ctx,
+  [a, b]: string[],
+): Promise<Reply> {
   if (a === "p") {
     const page = Number(b);
     return {
       view: {
         text: `<b>Timezone</b>\n\n${TZ_QUESTION}`,
-        keyboard: [...tzPicker("s", page >= 0 ? page : null, ctx.user.utcOffsetMinutes), [btn("‹ Settings", "set")]],
+        keyboard: [
+          ...tzPicker("s", page >= 0 ? page : null, ctx.user.utcOffsetMinutes),
+          [btn("‹ Settings", "set")],
+        ],
       },
     };
   }
@@ -120,10 +166,18 @@ export async function keyAction(ctx: Ctx, [action]: string[]): Promise<Reply> {
   return {};
 }
 
-export async function accountAction(ctx: Ctx, [action]: string[]): Promise<Reply> {
+export async function accountAction(
+  ctx: Ctx,
+  [action]: string[],
+): Promise<Reply> {
   if (action === "yes") {
     await ctx.db.users.deleteAccount();
-    return { view: { text: "Your profile, meals and API key were deleted. Send /start to begin again.", keyboard: [] } };
+    return {
+      view: {
+        text: "Your profile, meals and API key were deleted. Send /start to begin again.",
+        keyboard: [],
+      },
+    };
   }
   return {
     view: {

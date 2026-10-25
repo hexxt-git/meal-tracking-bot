@@ -13,6 +13,9 @@ export function createCtx(user: User, db: UserDb): Ctx {
   return {
     user,
     db,
-    send: (view) => typeof view === "string" ? telegram.send(user.chatId, view) : telegram.send(user.chatId, view.text, view.keyboard),
+    send: (view) =>
+      typeof view === "string"
+        ? telegram.send(user.chatId, view)
+        : telegram.send(user.chatId, view.text, view.keyboard),
   };
 }
