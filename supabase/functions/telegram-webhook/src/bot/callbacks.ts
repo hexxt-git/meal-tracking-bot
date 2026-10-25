@@ -1,5 +1,10 @@
 import { esc, telegram } from "../telegram/api.ts";
 import { answerQuestion, continuePastBudget, retry } from "./assistant.ts";
+import {
+  advancedAction,
+  providerAction,
+  welcomeAction,
+} from "./screens/advanced.ts";
 import { countryAction } from "./screens/country.ts";
 import type { CallbackQuery } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
@@ -67,6 +72,9 @@ const HANDLERS: Record<string, Handler> = {
   set: async (ctx) => ({ view: await settingsView(ctx) }),
   units: setUnits,
   rem: setReminders,
+  adv: advancedAction,
+  prov: providerAction,
+  wel: welcomeAction,
   key: keyAction,
   acct: accountAction,
   tz: (ctx, [mode, ...rest]) => {
@@ -99,6 +107,10 @@ const HANDLERS: Record<string, Handler> = {
 
 export async function runCallback(ctx: Ctx, cb: CallbackQuery) {
   const [kind, ...args] = (cb.data ?? "").split(":");
+  // Any other button ends a waiting settings prompt, so later text isn't taken as its answer.
+  if (ctx.user.awaitingInput && !(kind === "prov" && args[0] === "in")) {
+    ctx.user = await ctx.db.users.update({ awaitingInput: null });
+  }
   const reply = (await HANDLERS[kind]?.(ctx, args)) ?? {};
   if (reply.view && cb.message)
     await telegram.edit(

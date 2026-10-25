@@ -7,6 +7,7 @@ import { runCallback } from "./callbacks.ts";
 import { runCommand, runReplyKey } from "./commands.ts";
 import { createCtx, Ctx } from "./context.ts";
 import { respond, respondToEdit } from "./assistant.ts";
+import { handleSettingInput } from "./screens/advanced.ts";
 import { importCsv, isCsvFile } from "./screens/journal.ts";
 import { saveKey, stepView, welcomeView } from "./screens/onboarding.ts";
 
@@ -63,9 +64,10 @@ export async function handleUpdate(update: Update) {
   }
 }
 
-function routeMessage(ctx: Ctx, msg: Message) {
+async function routeMessage(ctx: Ctx, msg: Message) {
   const text = msg.text?.trim();
   if (text?.startsWith("/")) return runCommand(ctx, msg);
+  if (await handleSettingInput(ctx, msg)) return;
   if (text && looksLikeKey(text)) return saveKey(ctx, text, msg.message_id);
   if (ctx.user.onboardingStep === "key") return ctx.send(welcomeView());
   if (msg.document && isCsvFile(msg.document))

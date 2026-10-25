@@ -15,7 +15,7 @@ import {
   PROFILE_STEPS,
 } from "../src/domain/onboarding.ts";
 import { isMeaningfulEdit } from "../src/domain/question.ts";
-import { parseProviderError } from "../src/services/openrouter-error.ts";
+import { parseProviderError } from "../src/services/provider-error.ts";
 
 const meal = (id: string, kcal: number): Meal => ({
   id,
@@ -171,6 +171,8 @@ Deno.test(
       canAsk: true,
       canResearch: true,
       photoIds: [],
+      replyDetail: "normal",
+      unsupported: [],
       history: [
         {
           who: "User",

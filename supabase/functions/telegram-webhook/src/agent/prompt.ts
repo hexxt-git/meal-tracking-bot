@@ -1,4 +1,5 @@
 import { EDIT_WINDOW_HOURS, READ_WINDOW_DAYS } from "../domain/meal.ts";
+import type { ReplyDetail } from "../domain/ai-settings.ts";
 import type { QuestionAnswer } from "../domain/question.ts";
 
 export type PromptContext = {
@@ -17,6 +18,9 @@ export type PromptContext = {
   canResearch: boolean;
   /** Ids of this message's photos. */
   photoIds: string[];
+  replyDetail: ReplyDetail;
+  /** Attachments of this message the model can't receive. */
+  unsupported: string[];
   edit?: {
     before: string | null;
     after: string;
@@ -43,6 +47,22 @@ function transcript(history: PromptContext["history"]): string {
     .join("\n");
 }
 
+/** The user's reply detail setting. */
+const REPLY_LENGTH: Record<ReplyDetail, { log: string; answer: string }> = {
+  short: {
+    log: "Only the one or two assumptions that matter most, in 1 or 2 short sentences.",
+    answer: "usually 1 to 2 sentences",
+  },
+  normal: {
+    log: "Usually 2 to 5 short sentences; skip what is obvious.",
+    answer: "usually 2 to 5 sentences",
+  },
+  detailed: {
+    log: "Explain each item's portion and source, and how confident you are, in up to 8 sentences.",
+    answer: "as detailed as the question deserves, up to about 10 sentences",
+  },
+};
+
 export function systemPrompt(c: PromptContext): string {
   const research = c.canResearch
     ? `RESEARCH (required)
@@ -67,6 +87,10 @@ CONTEXT
 - Country: ${c.country ?? "not set"}. Units: ${c.units}.${c.targets ? ` Daily targets: ${c.targets}.` : ""}${
     c.photoIds.length
       ? `\n- This message's photos (ids ${c.photoIds.join(", ")}) are attached to your first request only. Look carefully then; call view_image only if you really need one again.`
+      : ""
+  }${
+    c.unsupported.length
+      ? `\n- The user attached ${c.unsupported.join(" and ")}, which the configured model can't receive. If you can't tell what they ate from the text, ask them to describe it in words; don't guess.`
       : ""
   }
 
@@ -94,8 +118,8 @@ MEAL TIME (eaten_at)
 - Omit eaten_at when no time is given (new meal = now; update keeps its time). Never in the future or over ${READ_WINDOW_DAYS} days back.
 
 REPLY TEXT
-- Plain text, English, no markdown. After logging or changing meals: no item list (the bot shows it), but state your assumptions so the user can correct them: how you judged each uncertain portion (e.g. "the chicken looks about 150 g next to the fork"), cooking fat or sauces you assumed, which product or pack size you took, where the numbers came from ("Soummam label", "research", "estimate"), and how you read an ambiguous time. Usually 2 to 5 short sentences; skip what is obvious.
-- Answers to questions or conversation: natural and conversational, usually 2 to 5 sentences; a short plain list is fine when it really helps. Give concrete numbers when you know them, and say when something is uncertain or individual (e.g. medical conditions: suggest asking a professional).
+- Plain text, English, no markdown. After logging or changing meals: no item list (the bot shows it), but state your assumptions so the user can correct them: how you judged each uncertain portion (e.g. "the chicken looks about 150 g next to the fork"), cooking fat or sauces you assumed, which product or pack size you took, where the numbers came from ("Soummam label", "research", "estimate"), and how you read an ambiguous time. ${REPLY_LENGTH[c.replyDetail].log}
+- Answers to questions or conversation: natural and conversational, ${REPLY_LENGTH[c.replyDetail].answer}; a short plain list is fine when it really helps. Give concrete numbers when you know them, and say when something is uncertain or individual (e.g. medical conditions: suggest asking a professional).
 
 RECENT CONVERSATION (oldest first; photos and voice notes are not included, only marked; your earlier replies are summarized with the meals they logged or changed):
 ${c.history.length ? transcript(c.history) : "(none)"}

@@ -5,12 +5,14 @@ estimates calories and macros, and tracks them against personal daily goals.
 
 It runs entirely on Supabase, with one Edge Function plus Postgres and no other server. Messages are handled by a
 tool-calling agent ([pi](https://github.com/earendil-works/pi) agent loop) on `google/gemini-3.8-flash` (minimal
-reasoning effort) through OpenRouter. It can research food on the web, and each user pays for their own usage with
-their own API key, within a daily budget of $0.20.
+reasoning effort by default) through OpenRouter, or through any OpenAI-compatible API the user configures. It can
+research food on the web, and each user pays for their own usage with their own key, within a daily budget they choose
+($0.20 by default).
 
 ## Using the bot
 
 1. **Start**: paste an OpenRouter API key into the chat. The key is checked, stored encrypted and the message is deleted.
+   Or tap **Use a custom provider** and set up an OpenAI-compatible API instead (see [Advanced settings](#advanced-settings)).
 2. **Setup** (optional, about a minute, all buttons): units, sex, age, height, weight, activity, goal and pace, then
    timezone (picked by current clock time) and country (picked by first letter). Daily goals are computed with
    Mifflin-St Jeor. Protein is 1.8 g/kg (2.0 when cutting), fat is 25% of calories and carbs are the rest.
@@ -37,7 +39,7 @@ their own API key, within a daily budget of $0.20.
    - **History**: older meals, page by page.
    - **Meal**: item table, with Delete and Undo.
    - **Goals**: steppers per value, or recalculate from your profile.
-   - **Profile**, **Settings** (units, timezone, country, reminders, API key, delete account).
+   - **Profile**, **Settings** (units, timezone, country, reminders, API key, Advanced, delete account).
 5. **Reminders**: after 12, 18, 24 and 48 hours without a logged meal the bot sends a short reminder, once each. Logging
    any meal restarts the timer. They can be turned off in Settings.
    - **Export CSV** / **Import CSV**: send back a file in the export format to import it. Meals already in the log are
@@ -92,15 +94,15 @@ Each message starts one agent run (`src/agent/`). The model gets the current loc
 targets, and the meals logged in the last 24 hours. It works through these tools in as many turns as it needs (up to
 6, 90 seconds at most):
 
-| Tool                          | Does                                                                                                                                                          |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `log_meal`                    | records a new meal with its item breakdown and optional eaten time                                                                                            |
-| `update_meal` / `delete_meal` | changes a meal logged in the last 24 h (older meals are read-only)                                                                                            |
-| `read_meals`                  | reads meals eaten in the last 7 days                                                                                                                          |
-| `research_food`               | one web-searched lookup (Exa via OpenRouter) in its own small request; only the short answer enters the agent's context. At most 2 per message                |
-| `view_image`                  | opens one photo by its short id: this message's (attached to the first request only) or an earlier one from the conversation or a meal; at most 3 per message |
-| `ask_user`                    | asks a multiple-choice question and ends the run; the answer re-runs it with the Q&A in context                                                               |
-| `reply`                       | the final message; called in the same turn as the last change, so simple messages take one request                                                            |
+| Tool                          | Does                                                                                                                                                                                      |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `log_meal`                    | records a new meal with its item breakdown and optional eaten time                                                                                                                        |
+| `update_meal` / `delete_meal` | changes a meal logged in the last 24 h (older meals are read-only)                                                                                                                        |
+| `read_meals`                  | reads meals eaten in the last 7 days                                                                                                                                                      |
+| `research_food`               | one web-searched lookup (Exa via OpenRouter, or a custom research model) in its own small request; only the short answer enters the agent's context. 1 to 4 per message by research depth |
+| `view_image`                  | opens one photo by its short id: this message's (attached to the first request only) or an earlier one from the conversation or a meal; at most 3 per message                             |
+| `ask_user`                    | asks a multiple-choice question and ends the run; the answer re-runs it with the Q&A in context                                                                                           |
+| `reply`                       | the final message; called in the same turn as the last change, so simple messages take one request                                                                                        |
 
 Every write in a run shares one undo batch. The function logs each tool call, each request's billed cost and its
 OpenRouter generation id (look one up for free with `GET https://openrouter.ai/api/v1/generation?id=…`).
@@ -121,9 +123,37 @@ $0.0055 at minimal, with similar estimates. Google's native search through OpenR
 so research uses Exa instead. Products already logged in the last day are reused instead of researched again.
 
 A typical day of 7 meal photos, 2 new branded products and a correction comes to about $0.08. Two guards keep
-every user under `config.budget.dailyUsd` ($0.20): research is switched off once the day passes $0.12, and requests
-stop at $0.20 until midnight UTC. The stop message has a Continue anyway button that lifts both guards for the rest of
+every user under their daily budget ($0.20 by default): research is switched off once the day passes 60% of it, and
+requests stop at the budget until midnight UTC. The stop message has a Continue anyway button that lifts both guards for the rest of
 that UTC day. Daily totals are stored in `app.ai_usage`.
+
+## Advanced settings
+
+Settings → Advanced, stored per user in `users.ai_settings`:
+
+| Setting      | Choices                                                                  | Default    |
+| ------------ | ------------------------------------------------------------------------ | ---------- |
+| AI provider  | OpenRouter, or a custom OpenAI-compatible API                            | OpenRouter |
+| Reasoning    | minimal, low, medium, high                                               | minimal    |
+| Research     | off, quick (1 lookup, 3 results), standard (2, 3), deep (4, 5)           | standard   |
+| Daily budget | $0.10, $0.20, $0.50, $1, no limit                                        | $0.20      |
+| Reply detail | short, normal, detailed: how much the assistant explains its assumptions | normal     |
+
+The **custom provider** screen takes any chat completions API over https: base URL (a pasted
+`…/chat/completions` URL is trimmed), model id, auth (`Authorization: Bearer`, a named key header such as `api-key`,
+or none), extra headers, whether images are sent (off for text-only models), how the reasoning effort is sent (not at
+all, `reasoning_effort`, or OpenRouter-style `reasoning.effort`) and an optional research model on the same API that
+searches the web itself (for example a Perplexity `sonar` model). Without a research model, lookups keep using
+OpenRouter when the user also has a key, and are off otherwise. **Test connection** sends a tiny request, and **Turn
+on** only switches over when that test passes.
+
+Typed values (URL, model, token, headers) are entered as a chat message after tapping the button; the bot waits 10
+minutes for it, and any other button cancels. Messages with the token or headers are deleted once read. The token and
+extra headers are stored as one Vault secret (`provider:<tg_id>`); the rest is plain settings. URLs must be public
+https hosts: localhost, private and link-local addresses are refused, since requests go out from the Edge Function.
+
+With a custom provider, voice notes aren't sent (the assistant asks for text instead), and spend isn't counted toward
+the budget because such APIs usually don't report cost; OpenRouter research still is.
 
 ## Errors
 
@@ -142,8 +172,8 @@ the error message gets a Retry button that runs the same message again (kept in 
   `app.tg_id` set to the sender. RLS is forced on every table, so `bot_user` only sees rows where
   `tg_id = app.tg_id()`. A handler bug can't read or write another user's rows, and forged button data (another user's
   meal id, for example) simply matches nothing.
-- **API keys**: stored in Supabase Vault and reachable only through `security definer` functions that read or write the
-  caller's own secret. Database dumps contain only ciphertext.
+- **API keys**: OpenRouter keys and custom provider credentials are stored in Supabase Vault and reachable only through
+  `security definer` functions that read or write the caller's own secret. Database dumps contain only ciphertext.
 - **Abuse limits**: 60 updates per user per hour and 300 AI analyses per user per day, counted in Postgres. Telegram
   retries are deduplicated by `update_id`.
 
@@ -151,7 +181,7 @@ the error message gets a Retry button that runs the same message again (kept in 
 
 | Table               | Purpose                                                                                                                                                                        |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `users`             | Telegram id, chat id, setup step, profile, timezone offset, country, daily goals, Fix target, open question, last failed request                                               |
+| `users`             | Telegram id, chat id, setup step, profile, timezone offset, country, daily goals, Fix target, open question, last failed request, AI settings, pending settings prompt         |
 | `meals`             | `eaten_at` (when it was eaten, settable by the AI), `logged_at` (when the message was sent), title, AI item breakdown (JSON), totals, Telegram photo file ids, the user's text |
 | `meal_revisions`    | snapshot before each create/edit/delete, grouped by `batch_id`, for Undo (kept 30 days)                                                                                        |
 | `processed_updates` | Telegram update ids, for deduplication (kept 3 days)                                                                                                                           |

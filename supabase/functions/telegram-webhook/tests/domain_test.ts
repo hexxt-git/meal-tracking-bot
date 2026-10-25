@@ -1,4 +1,10 @@
 import { assertEquals } from "@std/assert";
+import {
+  aiSettings,
+  DEFAULT_SETTINGS,
+  parseBaseUrl,
+  parseHeaders,
+} from "../src/domain/ai-settings.ts";
 import { itemTotals } from "../src/domain/meal.ts";
 import {
   clampStep,
@@ -186,4 +192,44 @@ Deno.test("eaten_at in the user's offset resolves to the right instant", () => {
     "2026-10-19T09:00:00.000Z",
   );
   assertEquals(parseEatenAt("2026-10-19T15:00:00+01:00", sent), null);
+});
+
+Deno.test(
+  "custom provider base URLs: public https only, endpoint trimmed",
+  () => {
+    assertEquals(parseBaseUrl("https://api.groq.com/openai/v1/"), {
+      url: "https://api.groq.com/openai/v1",
+    });
+    assertEquals(parseBaseUrl("https://api.example.com/v1/chat/completions"), {
+      url: "https://api.example.com/v1",
+    });
+    for (const bad of [
+      "http://api.example.com/v1",
+      "https://localhost:8080/v1",
+      "https://192.168.1.10/v1",
+      "https://10.0.0.1",
+      "https://[::1]/v1",
+      "https://u:p@api.example.com",
+      "not a url",
+    ]) {
+      assertEquals("error" in parseBaseUrl(bad), true, bad);
+    }
+  },
+);
+
+Deno.test("extra headers parse one per line", () => {
+  assertEquals(parseHeaders("X-Org: acme\nOpenAI-Project: p1"), {
+    headers: { "X-Org": "acme", "OpenAI-Project": "p1" },
+  });
+  assertEquals("error" in parseHeaders("no colon here"), true);
+  assertEquals("error" in parseHeaders("Host: evil.com"), true);
+});
+
+Deno.test("stored AI settings fill in defaults", () => {
+  const s = aiSettings({ effort: "high", custom: { enabled: true } });
+  assertEquals(s.effort, "high");
+  assertEquals(s.researchDepth, DEFAULT_SETTINGS.researchDepth);
+  assertEquals(s.custom.enabled, true);
+  assertEquals(s.custom.auth, "bearer");
+  assertEquals(aiSettings(null), DEFAULT_SETTINGS);
 });

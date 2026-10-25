@@ -12,7 +12,9 @@ import {
 } from "../domain/question.ts";
 import { dayStart, mealTimeLabel } from "../domain/time.ts";
 import type { PhotoLibrary } from "../agent/tools.ts";
-import { base64, Media, OpenRouterError } from "../services/openrouter.ts";
+import { base64, Media, ProviderError } from "../services/llm.ts";
+import { resolveProviders } from "./providers.ts";
+import { RESEARCH, RESEARCH_CUTOFF_SHARE } from "../domain/ai-settings.ts";
 import { esc, telegram } from "../telegram/api.ts";
 import type { Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
@@ -171,15 +173,19 @@ async function collectInput(ctx: Ctx, msg: Message): Promise<ChatInput | null> {
   };
 }
 
-async function downloadMedia(input: ChatInput): Promise<Media[]> {
+/** Only what the model can receive: no photos for a text-only model, no voice notes outside OpenRouter. */
+async function downloadMedia(
+  input: ChatInput,
+  can: { images: boolean; audio: boolean },
+): Promise<Media[]> {
   const images = await Promise.all(
-    input.photoIds.map(async (id) => ({
+    (can.images ? input.photoIds : []).map(async (id) => ({
       kind: "image" as const,
       mime: input.imageMime,
       data: await telegram.download(id),
     })),
   );
-  if (!input.audio) return images;
+  if (!input.audio || !can.audio) return images;
   return [
     ...images,
     {
@@ -192,19 +198,21 @@ async function downloadMedia(input: ChatInput): Promise<Media[]> {
 
 async function run(ctx: Ctx, job: Job) {
   const { input } = job;
-  const apiKey = await ctx.db.keys.get();
-  if (!apiKey) return ctx.send(welcomeView());
+  const providers = await resolveProviders(ctx);
+  if (!providers) return ctx.send(welcomeView());
+  const { chat, settings } = providers;
   if (!(await ctx.db.limits.hit("ai", config.limits.analysesPerDay, "1 day"))) {
     return ctx.send(
       `You've reached the daily limit of ${config.limits.analysesPerDay} requests. It resets at midnight UTC.`,
     );
   }
   const usage = await ctx.db.usage.today();
-  if (usage.costUsd >= config.budget.dailyUsd && !usage.bypassed) {
+  const budget = usage.bypassed ? null : settings.dailyBudgetUsd;
+  if (budget != null && usage.costUsd >= budget) {
     return ctx.send({
       text:
-        `Today's AI budget of ${usd(config.budget.dailyUsd)} is used up (${usd(usage.costUsd)} spent on your OpenRouter key). ` +
-        "It resets at midnight UTC.\n\nContinue anyway to lift it for the rest of today.",
+        `Today's AI budget of ${usd(budget)} is used up (${usd(usage.costUsd)} spent). ` +
+        "It resets at midnight UTC, and you can change it in Settings → Advanced.\n\nContinue anyway to lift it for the rest of today.",
       keyboard: [
         [btn("Continue anyway", `budget:${await saveForRetry(ctx, job)}`)],
       ],
@@ -225,15 +233,36 @@ async function run(ctx: Ctx, job: Job) {
   let result: AgentResult;
   try {
     await telegram.typing(ctx.user.chatId);
+    const can = {
+      images: chat.kind === "openrouter" || chat.images,
+      audio: chat.kind === "openrouter",
+    };
+    const unsupported = [
+      ...(!can.images && input.photoIds.length
+        ? [
+            input.photoIds.length === 1
+              ? "a photo"
+              : `${input.photoIds.length} photos`,
+          ]
+        : []),
+      ...(!can.audio && input.audio ? ["a voice note"] : []),
+    ];
+    const researchAllowed =
+      budget == null || usage.costUsd < budget * RESEARCH_CUTOFF_SHARE;
     result = await runAgent({
-      apiKey,
+      provider: chat,
+      research: researchAllowed ? providers.research : null,
+      maxResearch: RESEARCH[settings.researchDepth].lookups,
+      effort: settings.effort,
+      replyDetail: settings.replyDetail,
+      unsupported,
       user: ctx.user,
       store: ctx.db.meals,
       text: input.text,
-      media: await downloadMedia(input),
+      media: await downloadMedia(input, can),
       photoIds: input.photoIds,
       photoRefs: await ctx.db.photos.register(input.photoIds),
-      library: photoLibrary(ctx),
+      library: can.images ? photoLibrary(ctx) : undefined,
       sentAt: new Date(input.sentAt),
       messageId: input.messageId,
       recentMeals: await ctx.db.meals.loggedSince(
@@ -241,8 +270,6 @@ async function run(ctx: Ctx, job: Job) {
       ),
       fixMeal: job.fixMealId ? await ctx.db.meals.byId(job.fixMealId) : null,
       answers: job.answers,
-      allowResearch:
-        usage.bypassed || usage.costUsd < config.budget.researchCutoffUsd,
       edit: job.edit
         ? await editContext(ctx, job.edit, input.messageId)
         : undefined,
@@ -294,7 +321,7 @@ async function run(ctx: Ctx, job: Job) {
       `Asked: ${q.question} (options: ${q.options.join(" / ")})`,
     );
   }
-  const view = await resultView(ctx, result);
+  const view = await resultView(ctx, result, chat.kind === "custom");
   // With changes saved, a retry could log them twice; the Undo and Fix buttons cover that case instead.
   if (!result.changes.length && (result.timedOut || result.error?.transient))
     view.keyboard = retryKeyboard(await saveForRetry(ctx, job));
@@ -394,7 +421,11 @@ async function rememberReply(ctx: Ctx, sent: unknown, summary: string) {
   if (id && summary) await ctx.db.messages.rememberReply(id, summary);
 }
 
-async function resultView(ctx: Ctx, r: AgentResult): Promise<View> {
+async function resultView(
+  ctx: Ctx,
+  r: AgentResult,
+  custom: boolean,
+): Promise<View> {
   const when = (m: Meal) =>
     mealTimeLabel(m.eatenAt, m.loggedAt, ctx.user.utcOffsetMinutes);
   const card = (c: Change) => {
@@ -413,7 +444,10 @@ async function resultView(ctx: Ctx, r: AgentResult): Promise<View> {
   };
 
   const parts = r.changes.map(card);
-  if (r.error) parts.push(openRouterMessage(r.error));
+  if (r.error)
+    parts.push(
+      custom ? customProviderMessage(r.error) : openRouterMessage(r.error),
+    );
   else if (r.timedOut)
     parts.push(
       `That took too long, so I stopped.${r.changes.length ? " The changes above were saved." : ""}`,
@@ -456,7 +490,7 @@ function audioFormat(mime: string | null) {
   return "ogg";
 }
 
-function openRouterMessage(e: OpenRouterError) {
+function openRouterMessage(e: ProviderError) {
   if (e.status === 401)
     return "OpenRouter rejected your API key. Paste a new one into the chat, or replace it in Menu → Settings.";
   if (e.status === 402)
@@ -473,4 +507,19 @@ function openRouterMessage(e: OpenRouterError) {
   if (e.status >= 500)
     return "OpenRouter or the model provider had a temporary problem.";
   return `OpenRouter returned an error: ${esc(e.message)}`;
+}
+
+function customProviderMessage(e: ProviderError) {
+  const fix = "Check it in Settings → Advanced → Custom provider.";
+  if (e.status === 401 || e.status === 403)
+    return `Your custom provider rejected the credentials (${e.status}: ${esc(e.message)}). ${fix}`;
+  if (e.status === 404)
+    return `Your custom provider couldn't find that URL or model (${esc(e.message)}). ${fix}`;
+  if (e.status === 429)
+    return "Your custom provider is rate limiting requests right now. Try again in a minute.";
+  if (e.status === 0)
+    return `The connection to your custom provider dropped or failed (${esc(e.message)}).`;
+  if (e.status >= 500)
+    return `Your custom provider had a problem (${e.status}: ${esc(e.message)}).`;
+  return `Your custom provider returned an error (${e.status}: ${esc(e.message)}). ${fix}`;
 }

@@ -16,12 +16,6 @@ export const config = {
     analysesPerDay: 300,
   },
   agent: {
-    /**
-     * Reasoning tokens are most of the cost: a photo measured about $0.011 at low or medium effort and $0.0055 at
-     * minimal, with similar estimates.
-     */
-    firstEffort: "minimal",
-    followUpEffort: "minimal",
     maxOutputTokens: 6000,
     maxTurns: 6,
     timeoutMs: 90_000,
@@ -29,7 +23,6 @@ export const config = {
     maxRunCostUsd: 0.04,
     /** Requests whose stream fails with a transient error (dropped connection, 5xx, 429) are re-sent this many times. */
     transientRetries: 1,
-    maxResearchPerRun: 2,
     /** view_image calls per message; each sends one photo to the model again (about $0.001). */
     maxImageViews: 3,
     /** Earlier messages (both sides, text only) given to the assistant, however old. */
@@ -42,15 +35,9 @@ export const config = {
   research: {
     /** OpenRouter search engine. "native" (Google Search for Gemini) measured $0.085 per search, too much for the budget. */
     engine: "exa",
-    maxResults: 3,
     effort: "minimal",
+    timeoutMs: 45_000,
     maxOutputTokens: 800,
-  },
-  /** Per user per UTC day, in billed OpenRouter USD. */
-  budget: {
-    dailyUsd: 0.2,
-    /** Above this, research is switched off for the rest of the day so logging stays within the budget. */
-    researchCutoffUsd: 0.12,
   },
   albumSettleMs: 2500,
 } as const;

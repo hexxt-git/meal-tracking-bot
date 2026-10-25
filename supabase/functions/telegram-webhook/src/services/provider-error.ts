@@ -1,4 +1,4 @@
-export class OpenRouterError extends Error {
+export class ProviderError extends Error {
   /** 0 when no HTTP status was received, e.g. the connection dropped mid-stream. */
   constructor(
     public status: number,
@@ -20,12 +20,12 @@ export class OpenRouterError extends Error {
 }
 
 /** pi reports provider failures as "<status>: <body>". */
-export function parseProviderError(message: string): OpenRouterError {
+export function parseProviderError(message: string): ProviderError {
   const status = Number(message.match(/^(\d{3})\b/)?.[1] ?? 0);
   const detail = message.replace(/^\d{3}:\s*/, "");
   try {
-    return new OpenRouterError(status, JSON.parse(detail).message ?? detail);
+    return new ProviderError(status, JSON.parse(detail).message ?? detail);
   } catch {
-    return new OpenRouterError(status, detail);
+    return new ProviderError(status, detail);
   }
 }

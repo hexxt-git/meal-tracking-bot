@@ -30,8 +30,13 @@ export const welcomeView = (): View => ({
 
 Log what you eat with a photo, a short description or a voice note. Calories and macros are estimated for you and tracked against your daily goals.
 
-To start, paste an OpenRouter API key into this chat. It is only used for your own requests, stored encrypted, and your message is deleted right away.`,
-  keyboard: [[link("Get a key at openrouter.ai", KEYS_URL)]],
+To start, paste an OpenRouter API key into this chat. It is only used for your own requests, stored encrypted, and your message is deleted right away.
+
+Or use any OpenAI-compatible API of your own instead.`,
+  keyboard: [
+    [link("Get a key at openrouter.ai", KEYS_URL)],
+    [btn("Use a custom provider", "prov")],
+  ],
 });
 
 export const keyPromptView = (back?: string): View => ({
@@ -142,6 +147,11 @@ export async function saveKey(ctx: Ctx, key: string, messageId: number) {
     });
   }
   await ctx.db.keys.set(key);
+  return credentialsSaved(ctx, "Key saved and your message deleted.");
+}
+
+/** After a key or custom provider is set: continues first-time setup, or just confirms. */
+export async function credentialsSaved(ctx: Ctx, note: string) {
   const firstSetup = ctx.user.onboardingStep === "key";
   ctx.user = await ctx.db.users.update({
     onboardingStep: stepAfterKey(
@@ -154,11 +164,11 @@ export async function saveKey(ctx: Ctx, key: string, messageId: number) {
       stepView(
         ctx,
         undefined,
-        "Key saved and your message deleted.\n\nNext, a few questions to set your daily goals.\n\n",
+        `${note}\n\nNext, a few questions to set your daily goals.\n\n`,
       ),
     );
   }
-  return ctx.send("Key saved and your message deleted.");
+  return ctx.send(note);
 }
 
 export async function startProfile(ctx: Ctx): Promise<View> {

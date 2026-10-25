@@ -5,15 +5,18 @@ import type { Meal } from "../db/index.ts";
 import { countryName } from "../domain/countries.ts";
 import type { QuestionAnswer } from "../domain/question.ts";
 import { isoOffset, localIso, localStamp } from "../domain/time.ts";
+import type { Effort, ReplyDetail } from "../domain/ai-settings.ts";
 import {
   base64,
+  ChatProvider,
   chatModel,
   Media,
-  openRouterStream,
-  OpenRouterError,
   parseProviderError,
+  ProviderError,
+  providerStream,
+  ResearchProvider,
   researchFood,
-} from "../services/openrouter.ts";
+} from "../services/llm.ts";
 import { systemPrompt } from "./prompt.ts";
 import {
   Change,
@@ -36,7 +39,14 @@ export type AgentUser = {
 };
 
 export type AgentInput = {
-  apiKey: string;
+  provider: ChatProvider;
+  /** Null when research is off, unavailable or over today's budget. */
+  research: ResearchProvider | null;
+  maxResearch: number;
+  effort: Effort;
+  replyDetail: ReplyDetail;
+  /** What the user attached that the model can't receive, e.g. "2 photos", "a voice note". */
+  unsupported: string[];
   user: AgentUser;
   store: MealStore;
   text: string;
@@ -53,7 +63,6 @@ export type AgentInput = {
   recentMeals: Meal[];
   fixMeal: Meal | null;
   answers: QuestionAnswer[];
-  allowResearch: boolean;
   /** Earlier messages, oldest first, not including this one. */
   history: {
     role: "user" | "assistant";
@@ -72,9 +81,9 @@ export type AgentResult = {
   changes: Change[];
   batchId: string;
   question: { question: string; options: string[] } | null;
-  error: OpenRouterError | null;
+  error: ProviderError | null;
   timedOut: boolean;
-  /** As billed by OpenRouter, including research. */
+  /** As billed by the provider, including research; custom APIs usually report nothing, so 0. */
   costUsd: number;
   turns: number;
   searches: number;
@@ -98,9 +107,10 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   const country = countryName(u.country);
   const generationIds: string[] = [];
   let costUsd = 0;
-  const research = input.allowResearch
+  const researchProvider = input.maxResearch > 0 ? input.research : null;
+  const research = researchProvider
     ? async (query: string) => {
-        const r = await researchFood(input.apiKey, query, country);
+        const r = await researchFood(researchProvider, query, country);
         costUsd += r.costUsd;
         if (r.generationId) generationIds.push(r.generationId);
         input.trace?.(
@@ -123,7 +133,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     library: input.library,
     maxImageViews: config.agent.maxImageViews,
     research,
-    maxResearch: config.agent.maxResearchPerRun,
+    maxResearch: input.maxResearch,
     overBudget: () => costUsd >= config.agent.maxRunCostUsd,
   });
 
@@ -142,6 +152,8 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     canAsk,
     canResearch: research != null,
     photoIds: photos.map((p) => p.id),
+    replyDetail: input.replyDetail,
+    unsupported: input.unsupported,
     history: input.history.map((h) => ({
       who: h.role === "user" ? "User" : "You",
       at: localStamp(h.at, off),
@@ -160,12 +172,13 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   const agent = new Agent({
     initialState: {
       systemPrompt: prompt,
-      model: chatModel(),
-      thinkingLevel: config.agent.firstEffort,
+      model: chatModel(input.provider),
+      thinkingLevel: input.effort,
       tools: mealTools(run, canAsk),
     },
-    streamFn: openRouterStream(
-      input.apiKey,
+    streamFn: providerStream(
+      input.provider,
+      input.effort,
       input.media.filter((m) => m.kind === "audio"),
       (usage) => {
         costUsd += usage.costUsd;
