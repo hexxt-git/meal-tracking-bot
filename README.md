@@ -29,8 +29,8 @@ research food on the web, and each user pays for their own usage with their own 
    - **Conversation**: the assistant sees the last 10 messages from both sides (text only, photos marked), so
      follow-ups like "why?" or "what about brown rice?" work.
    - **Edits**: editing a sent message re-runs the assistant with the before and after text and the meals that message
-     logged or changed, so "2 eggs" edited to "3 eggs" updates the meal. Edits that only change case, punctuation or
-     spacing are ignored.
+     logged or changed, so "2 eggs" edited to "3 eggs" updates the meal. Edits that only change case or spacing are
+     ignored.
    - **Times**: the assistant gets the moment the message was sent, in your timezone, and resolves "this morning at
      10" or "yesterday's dinner" against it. Each meal keeps both its eaten and logged time.
 4. **Browse**: the bottom keyboard opens **Today**, **History** and **Menu**:

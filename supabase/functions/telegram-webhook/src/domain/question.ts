@@ -43,12 +43,8 @@ export const isOpen = (
 
 export const newQuestionId = () => crypto.randomUUID().slice(0, 8);
 
-const normalized = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim();
+const normalized = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
-/** Edits that only change case, punctuation or spacing don't change what the message says. */
+/** Edits that only change case or spacing don't change what the message says. */
 export const isMeaningfulEdit = (before: string, after: string) =>
   normalized(before) !== normalized(after);

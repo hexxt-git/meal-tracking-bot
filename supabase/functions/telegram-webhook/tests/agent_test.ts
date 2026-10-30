@@ -147,11 +147,12 @@ Deno.test("csv import accepts older exports and rejects other files", () => {
   assertEquals(parseCsv('a,"b ""c""",d\n'), [["a", 'b "c"', "d"]]);
 });
 
-Deno.test("only edits that change words count", () => {
+Deno.test("edits that only change case or spacing don't count", () => {
   assertEquals(
-    isMeaningfulEdit("2 eggs and toast", "2 Eggs, and toast!"),
+    isMeaningfulEdit("2 eggs and toast", "2 Eggs  and toast"),
     false,
   );
+  assertEquals(isMeaningfulEdit("2 eggs and toast", "2 eggs and toast?"), true);
   assertEquals(isMeaningfulEdit("2 eggs and toast", "3 eggs and toast"), true);
   assertEquals(isMeaningfulEdit("café au lait", "cafe au lait"), true);
 });

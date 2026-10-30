@@ -459,12 +459,12 @@ Deno.test(
 );
 
 Deno.test(
-  "edits: only word changes count, including digits and unicode letters",
+  "edits: case and spacing are ignored, punctuation and unicode letters count",
   () => {
     assertEquals(isMeaningfulEdit("", ""), false);
     assertEquals(isMeaningfulEdit("2 eggs", "2  eggs\n"), false);
     assertEquals(isMeaningfulEdit("2 eggs", "20 eggs"), true);
-    assertEquals(isMeaningfulEdit("خبز", "خبز!"), false);
+    assertEquals(isMeaningfulEdit("خبز", "خبز!"), true);
   },
 );
 
