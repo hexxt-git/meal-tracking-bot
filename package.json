@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "supabase": "supabase",
-    "test": "cd supabase/functions/telegram-webhook && deno test tests/",
+    "test": "cd supabase/functions/telegram-webhook && deno test --allow-env --allow-sys tests/",
     "check": "cd supabase/functions/telegram-webhook && deno check index.ts && deno lint",
     "db:push": "supabase db push",
     "deploy": "supabase functions deploy telegram-webhook --no-verify-jwt --use-api",

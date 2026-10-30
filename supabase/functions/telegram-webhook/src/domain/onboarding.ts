@@ -99,7 +99,9 @@ export function parseChoice(
     case "sex":
       return value === "male" || value === "female" ? { sex: value } : null;
     case "activity":
-      return value in ACTIVITY ? { activity: value as Activity } : null;
+      return Object.hasOwn(ACTIVITY, value)
+        ? { activity: value as Activity }
+        : null;
     case "objective":
       if (value !== "lose" && value !== "maintain" && value !== "gain")
         return null;
@@ -113,7 +115,7 @@ export function parseChoice(
       return opt ? { paceKgPerWeek: opt.kg } : null;
     }
     case "timezone": {
-      const off = Number(value);
+      const off = /^-?\d+$/.test(value) ? Number(value) : NaN;
       return TZ_OFFSETS.includes(off) ? { utcOffsetMinutes: off } : null;
     }
     case "country":
@@ -191,10 +193,12 @@ export function stepper(step: NumericStep, s: ProfileState): Stepper {
   }
 }
 
-/** Clamps and snaps a (possibly forged) stepper value. */
+/** Clamps a (possibly forged) stepper value and snaps it to the stepper's smallest step. */
 export function clampStep(spec: Stepper, value: number): number {
   if (!Number.isFinite(value)) return spec.initial;
-  return Math.min(spec.max, Math.max(spec.min, Math.round(value * 2) / 2));
+  const unit = Math.min(...spec.deltas.map(Math.abs));
+  const snapped = Math.round(value / unit) * unit;
+  return Math.min(spec.max, Math.max(spec.min, snapped));
 }
 
 export function completeProfile(s: ProfileState): Profile | null {

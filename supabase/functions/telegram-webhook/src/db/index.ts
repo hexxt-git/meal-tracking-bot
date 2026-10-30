@@ -9,8 +9,9 @@ import { photosRepo } from "./repos/photos.ts";
 import { remindersRepo } from "./repos/reminders.ts";
 import { usageRepo } from "./repos/usage.ts";
 import { usersRepo } from "./repos/users.ts";
+import { weightsRepo } from "./repos/weights.ts";
 
-export type { Meal, User } from "./schema.ts";
+export type { Meal, User, Weight } from "./schema.ts";
 
 /** Data access for one Telegram user. Every call runs under RLS as that user. */
 export function userDb(tgId: number) {
@@ -24,6 +25,7 @@ export function userDb(tgId: number) {
     usage: usageRepo(run),
     messages: messagesRepo(run),
     photos: photosRepo(run),
+    weights: weightsRepo(run),
   };
 }
 

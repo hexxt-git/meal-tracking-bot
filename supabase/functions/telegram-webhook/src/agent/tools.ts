@@ -1,7 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { TSchema, Type } from "typebox";
-import type { Meal, UserDb } from "../db/index.ts";
+import type { Meal, UserDb, Weight } from "../db/index.ts";
 import {
   isEditable,
   itemTotals,
@@ -10,11 +10,29 @@ import {
   sanitizeItems,
 } from "../domain/meal.ts";
 import { dayStart, localStamp, parseEatenAt } from "../domain/time.ts";
+import {
+  isPlausibleKg,
+  MAX_WEIGHT_KG,
+  MIN_WEIGHT_KG,
+  toKg,
+  WeightUnit,
+} from "../domain/weight.ts";
 
 export type MealStore = Pick<
   UserDb["meals"],
   "byId" | "since" | "create" | "update" | "delete"
 >;
+
+export type WeightStore = Pick<
+  UserDb["weights"],
+  "byId" | "recent" | "create" | "update" | "delete"
+>;
+
+export type WeightChange = {
+  kind: "created" | "updated" | "deleted";
+  weight: Weight;
+  before?: Weight;
+};
 
 export type Change = {
   kind: "created" | "updated" | "deleted";
@@ -36,6 +54,7 @@ export type PhotoLibrary = {
 
 export type RunOptions = {
   store: MealStore;
+  weights: WeightStore;
   offsetMin: number;
   sentAt: Date;
   userText: string | null;
@@ -57,6 +76,7 @@ export type RunOptions = {
 export class RunState {
   readonly batchId = crypto.randomUUID();
   readonly changes = new Map<string, Change>();
+  readonly weightChanges = new Map<string, WeightChange>();
   question: { question: string; options: string[] } | null = null;
   replyText: string | null = null;
   researches = 0;
@@ -79,6 +99,26 @@ export class RunState {
       return this.changes.set(meal.id, { kind: "created", meal });
     }
     this.changes.set(meal.id, { kind, meal, before: prev.before });
+  }
+
+  recordWeight(kind: WeightChange["kind"], weight: Weight, before?: Weight) {
+    const prev = this.weightChanges.get(weight.id);
+    if (!prev)
+      return this.weightChanges.set(weight.id, { kind, weight, before });
+    if (prev.kind === "created") {
+      if (kind === "deleted") return this.weightChanges.delete(weight.id);
+      return this.weightChanges.set(weight.id, { kind: "created", weight });
+    }
+    this.weightChanges.set(weight.id, { kind, weight, before: prev.before });
+  }
+
+  weightView(w: Weight) {
+    return {
+      id: w.id,
+      weighed_at: localStamp(w.weighedAt, this.o.offsetMin),
+      weight_kg: w.weightKg,
+      entered_in: w.unit,
+    };
   }
 
   /** Meals as the model sees them: local times, an editable flag and the ids of their photos. */
@@ -141,14 +181,121 @@ const ok = (data: unknown) => ({
   details: undefined,
 });
 
-function eatenAt(s: string | undefined, run: RunState): Date | undefined {
+function eatenAt(
+  s: string | undefined,
+  run: RunState,
+  field = "eaten_at",
+): Date | undefined {
   if (s === undefined) return undefined;
   const d = parseEatenAt(s, run.o.sentAt.getTime(), READ_WINDOW_DAYS);
   if (!d)
     throw new Error(
-      `eaten_at must be ISO 8601, not in the future and at most ${READ_WINDOW_DAYS} days back`,
+      `${field} must be ISO 8601, not in the future and at most ${READ_WINDOW_DAYS} days back`,
     );
   return d;
+}
+
+const Unit = Type.Union([Type.Literal("kg"), Type.Literal("lb")]);
+
+const WeighedAt = Type.String({
+  description:
+    "When they weighed themselves, ISO 8601 with the user's UTC offset. Omit when the user gives no time.",
+});
+
+function weightKg(value: number, unit: WeightUnit): number {
+  const kg = toKg(value, unit);
+  if (!isPlausibleKg(kg))
+    throw new Error(
+      `Weight must be between ${MIN_WEIGHT_KG} and ${MAX_WEIGHT_KG} kg; check the number and the unit`,
+    );
+  return kg;
+}
+
+async function existingWeight(run: RunState, id: string): Promise<Weight> {
+  const w = UUID.test(id) ? await run.o.weights.byId(id) : null;
+  if (!w) throw new Error(`No weigh-in with id ${id}`);
+  return w;
+}
+
+function weightTools(run: RunState): AgentTool[] {
+  return [
+    tool({
+      name: "read_weights",
+      label: "Read weights",
+      description: "The user's most recent weigh-ins, newest first.",
+      parameters: Type.Object({
+        limit: Type.Integer({ minimum: 1, maximum: 60 }),
+      }),
+      execute: async (_id, p) => {
+        const rows = await run.o.weights.recent(
+          Math.min(60, Math.max(1, p.limit)),
+        );
+        return ok(rows.map((w) => run.weightView(w)));
+      },
+    }),
+    tool({
+      name: "log_weight",
+      label: "Log weight",
+      description:
+        "Records a body weight reading, in the unit the user gave or the scale shows.",
+      parameters: Type.Object({
+        weight: Type.Number(),
+        unit: Unit,
+        weighed_at: Type.Optional(WeighedAt),
+      }),
+      execute: async (_id, p) => {
+        const weight = await run.o.weights.create({
+          weighedAt: eatenAt(p.weighed_at, run, "weighed_at") ?? run.o.sentAt,
+          weightKg: weightKg(p.weight, p.unit),
+          unit: p.unit,
+          batchId: run.batchId,
+          sourceMessageId: run.o.messageId,
+        });
+        run.recordWeight("created", weight);
+        return ok(run.weightView(weight));
+      },
+    }),
+    tool({
+      name: "update_weight",
+      label: "Update weight",
+      description:
+        "Corrects a weigh-in. Pass weight and unit together to change the value.",
+      parameters: Type.Object({
+        weight_id: Type.String(),
+        weight: Type.Optional(Type.Number()),
+        unit: Type.Optional(Unit),
+        weighed_at: Type.Optional(WeighedAt),
+      }),
+      execute: async (_id, p) => {
+        const before = await existingWeight(run, p.weight_id);
+        const unit = p.unit ?? before.unit;
+        const result = await run.o.weights.update(before.id, {
+          ...(p.weight !== undefined
+            ? { weightKg: weightKg(p.weight, unit), unit }
+            : {}),
+          ...(p.weighed_at !== undefined
+            ? { weighedAt: eatenAt(p.weighed_at, run, "weighed_at") }
+            : {}),
+        });
+        if (!result) throw new Error(`No weigh-in with id ${p.weight_id}`);
+        run.recordWeight("updated", result, before);
+        return ok(run.weightView(result));
+      },
+    }),
+    tool({
+      name: "delete_weight",
+      label: "Delete weight",
+      description: "Deletes a weigh-in, e.g. a wrong reading or a duplicate.",
+      parameters: Type.Object({ weight_id: Type.String() }),
+      execute: async (_id, p) => {
+        const w = await existingWeight(run, p.weight_id);
+        const gone = await run.o.weights.delete(w.id);
+        if (!gone) throw new Error(`No weigh-in with id ${p.weight_id}`);
+        run.recordWeight("deleted", gone, gone);
+        return ok({ deleted: w.id });
+      },
+    }),
+  ];
 }
 
 async function editableMeal(run: RunState, id: string): Promise<Meal> {
@@ -287,6 +434,7 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
         return ok({ deleted: meal.id });
       },
     }),
+    ...weightTools(run),
   ];
   if (run.o.photos?.length || run.o.library) {
     const maxViews = run.o.maxImageViews ?? 3;
@@ -360,15 +508,14 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
         }),
       }),
       execute: (_id, p) => {
-        if (run.changes.size)
-          throw new Error("Ask before logging or changing meals, not after");
-        run.question = {
-          question: p.question.trim(),
-          options: p.options
-            .map((o) => o.trim())
-            .filter(Boolean)
-            .slice(0, 4),
-        };
+        if (run.changes.size || run.weightChanges.size)
+          throw new Error("Ask before logging or changing anything, not after");
+        const options = [
+          ...new Set(p.options.map((o) => o.trim()).filter(Boolean)),
+        ].slice(0, 4);
+        if (options.length < 2)
+          throw new Error("Give 2 to 4 different, non-empty options");
+        run.question = { question: p.question.trim(), options };
         return Promise.resolve({ ...ok({ asked: true }), terminate: true });
       },
     }),

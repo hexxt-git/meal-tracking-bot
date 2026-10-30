@@ -116,7 +116,8 @@ export function parseBaseUrl(
     return { error: "The URL must start with https://" };
   if (u.username || u.password)
     return { error: "Put credentials in the token, not in the URL." };
-  if (PRIVATE_HOST.test(u.hostname))
+  // A trailing dot is the same host to DNS ("localhost." is localhost).
+  if (PRIVATE_HOST.test(u.hostname.replace(/\.+$/, "")))
     return {
       error:
         "Local and private network addresses can't be reached from the bot's server.",

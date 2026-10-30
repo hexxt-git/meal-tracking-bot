@@ -12,10 +12,10 @@ export const menuView = (): View => ({
   text: "<b>Menu</b>",
   keyboard: [
     [btn("Today", "day:0"), btn("Week", "week")],
-    [btn("History", "hist:0"), btn("Goals", "goals")],
-    [btn("Profile", "prof"), btn("Settings", "set")],
+    [btn("History", "hist:0"), btn("Weight", "wt:0")],
+    [btn("Goals", "goals"), btn("Profile", "prof")],
+    [btn("Settings", "set"), btn("Help", "help")],
     [btn("Export CSV", "csv"), btn("Import CSV", "imp")],
-    [btn("Help", "help")],
   ],
 });
 
@@ -27,6 +27,8 @@ ${LOG_HINT} Several photos sent together count as one meal.
 To correct something, just say so, for example "that was 2 eggs, not 3", "add a coke to lunch" or "I had it at 10". Meals logged in the last 24 hours can be changed this way; tapping Fix under a reply tells the assistant which meal you mean.
 
 Packaged and restaurant food is looked up online, preferring products sold in your country (set it in Settings). When an amount matters and can't be guessed, the assistant asks a quick multiple-choice question.
+
+To track your body weight, send it like "70kg" or "154 lb", or a photo of your scale; see it in Menu → Weight.
 
 You can also edit a message you sent; the meal it logged is updated to match. And you can ask about your log ("how much protein do I have left today?") or about food and nutrition in general.
 

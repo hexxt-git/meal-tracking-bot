@@ -38,6 +38,7 @@ const meal = (id: string, kcal: number): Meal => ({
 Deno.test("run changes fold into their net effect", () => {
   const run = new RunState({
     store: {} as never,
+    weights: {} as never,
     offsetMin: 0,
     sentAt: new Date(),
     userText: null,
@@ -166,6 +167,7 @@ Deno.test(
       units: "metric",
       targets: null,
       recentMeals: [],
+      recentWeights: [],
       fixMeal: null,
       answers: [],
       canAsk: true,

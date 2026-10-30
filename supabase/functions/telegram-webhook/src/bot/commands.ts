@@ -69,7 +69,10 @@ const COMMANDS: Record<string, Command> = {
 export function runCommand(ctx: Ctx, msg: Message) {
   const [head, ...rest] = msg.text!.trim().split(/\s+/);
   const name = head.slice(1).split("@")[0].toLowerCase();
-  return (COMMANDS[name] ?? COMMANDS.menu)(ctx, rest.join(" "), msg);
+  const command = Object.hasOwn(COMMANDS, name)
+    ? COMMANDS[name]
+    : COMMANDS.menu;
+  return command(ctx, rest.join(" "), msg);
 }
 
 /** Taps on the persistent bottom keyboard arrive as plain text. */

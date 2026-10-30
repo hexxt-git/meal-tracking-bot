@@ -18,6 +18,36 @@ function itemLines(m: Meal): string {
   return `${m.items.map((i) => `• ${esc(i.name)}, ${esc(i.portion)}  ·  ${num(i.kcal)} kcal`).join("\n")}\n\n`;
 }
 
+// Differences of the rounded values, so they match the numbers shown next to them (85.5 of 132 shows 86, so 46 left).
+const diff = (value: number, target: number) =>
+  Math.round(target) - Math.round(value);
+
+/** "46 g" / "over 10 g" */
+const left = (value: number, target: number, unit: string) => {
+  const d = diff(value, target);
+  return d < 0 ? `over ${num(-d)} ${unit}` : `${num(d)} ${unit}`;
+};
+
+/** "680 kcal left" / "120 kcal over" */
+export const kcalLeft = (value: number, target: number) => {
+  const d = diff(value, target);
+  return d < 0 ? `${num(-d)} kcal over` : `${num(d)} kcal left`;
+};
+
+/** "Left: 680 kcal · P 46 g · C 40 g · F over 10 g", skipping macros without a target. */
+function leftLine(t: Totals, u: User, targetKcal: number): string {
+  const macros = (
+    [
+      ["P", t.proteinG, u.targetProteinG],
+      ["C", t.carbsG, u.targetCarbsG],
+      ["F", t.fatG, u.targetFatG],
+    ] as const
+  ).flatMap(([label, value, target]) =>
+    target == null ? [] : [`${label} ${left(value, target, "g")}`],
+  );
+  return `Left: ${[left(t.kcal, targetKcal, "kcal"), ...macros].join("  ·  ")}`;
+}
+
 /** Totals against targets as an aligned block with bars; plain totals when no targets are set. */
 export function progressTable(t: Totals, u: User): string {
   if (u.targetKcal == null) {
@@ -37,7 +67,7 @@ export function progressTable(t: Totals, u: User): string {
     `/ ${num(target)}${unit}`,
     bar(value, target),
   ];
-  return table(
+  return `${table(
     [
       row("Calories", t.kcal, u.targetKcal, ""),
       row("Protein", t.proteinG, u.targetProteinG ?? 0, " g"),
@@ -45,7 +75,7 @@ export function progressTable(t: Totals, u: User): string {
       row("Fat", t.fatG, u.targetFatG ?? 0, " g"),
     ],
     ["l", "r", "l", "l"],
-  );
+  )}${leftLine(t, u, u.targetKcal)}`;
 }
 
 export function mealBody(m: Meal): string {

@@ -1,4 +1,4 @@
-import { AgentResult, Change, runAgent } from "../agent/index.ts";
+import { AgentResult, Change, runAgent, WeightChange } from "../agent/index.ts";
 import { config } from "../config.ts";
 import type { Meal } from "../db/index.ts";
 import { sumTotals } from "../domain/meal.ts";
@@ -11,6 +11,7 @@ import {
   PendingQuestion,
 } from "../domain/question.ts";
 import { dayStart, mealTimeLabel } from "../domain/time.ts";
+import { fmtWeight, unitFor, unitsFor } from "../domain/weight.ts";
 import type { PhotoLibrary } from "../agent/tools.ts";
 import { base64, Media, ProviderError } from "../services/llm.ts";
 import { resolveProviders } from "./providers.ts";
@@ -18,7 +19,7 @@ import { RESEARCH, RESEARCH_CUTOFF_SHARE } from "../domain/ai-settings.ts";
 import { esc, telegram } from "../telegram/api.ts";
 import type { Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
-import { mealBody } from "./format.ts";
+import { clock, dayLabel, kcalLeft, mealBody } from "./format.ts";
 import { welcomeView } from "./screens/onboarding.ts";
 import { btn, LOG_HINT, num, Reply, rows, View } from "./ui.ts";
 
@@ -230,6 +231,7 @@ async function run(ctx: Ctx, job: Job) {
     () => telegram.typing(ctx.user.chatId).catch(() => {}),
     4500,
   );
+  const recentWeights = await ctx.db.weights.recent(5);
   let result: AgentResult;
   try {
     await telegram.typing(ctx.user.chatId);
@@ -258,6 +260,8 @@ async function run(ctx: Ctx, job: Job) {
       unsupported,
       user: ctx.user,
       store: ctx.db.meals,
+      weights: ctx.db.weights,
+      recentWeights,
       text: input.text,
       media: await downloadMedia(input, can),
       photoIds: input.photoIds,
@@ -286,8 +290,10 @@ async function run(ctx: Ctx, job: Job) {
     clearInterval(typing);
   }
   await ctx.db.usage.record(result.costUsd, result.searches);
-  if (result.changes.length)
-    await ctx.db.messages.addBatch(input.messageId, result.batchId);
+  const changed = result.changes.length + result.weightChanges.length > 0;
+  if (changed) await ctx.db.messages.addBatch(input.messageId, result.batchId);
+  if (result.weightChanges.length)
+    await syncProfileWeight(ctx, recentWeights.length === 0, result);
   const outcome = result.error
     ? `error ${result.error.status} ${result.error.message.slice(0, 200)}`
     : result.timedOut
@@ -298,7 +304,7 @@ async function run(ctx: Ctx, job: Job) {
       `${result.hitCostCap ? " (hit cost cap)" : ""}, generations ${result.generationIds.join(",")}`,
   );
 
-  if (result.question && !result.changes.length) {
+  if (result.question && !changed) {
     const q: PendingQuestion = {
       id: newQuestionId(),
       ...result.question,
@@ -323,10 +329,20 @@ async function run(ctx: Ctx, job: Job) {
   }
   const view = await resultView(ctx, result, chat.kind === "custom");
   // With changes saved, a retry could log them twice; the Undo and Fix buttons cover that case instead.
-  if (!result.changes.length && (result.timedOut || result.error?.transient))
+  if (!changed && (result.timedOut || result.error?.transient))
     view.keyboard = retryKeyboard(await saveForRetry(ctx, job));
   const sent = await ctx.send(view);
   return rememberReply(ctx, sent, replySummary(result));
+}
+
+/** Keeps the profile weight at the latest weigh-in; the very first weigh-in also sets the display units. */
+async function syncProfileWeight(ctx: Ctx, first: boolean, r: AgentResult) {
+  const [latest] = await ctx.db.weights.recent(1);
+  const created = r.weightChanges.find((c) => c.kind === "created");
+  ctx.user = await ctx.db.users.update({
+    ...(latest ? { weightKg: latest.weightKg } : {}),
+    ...(first && created ? { units: unitsFor(created.weight.unit) } : {}),
+  });
 }
 
 async function editContext(
@@ -399,7 +415,12 @@ async function chatHistory(ctx: Ctx, currentMessageId: number) {
 }
 
 /** What the assistant said and did, as it will read it back in later runs. */
-function replySummary(r: AgentResult): string {
+export function replySummary(r: AgentResult): string {
+  const weights = r.weightChanges.map((c) =>
+    c.kind === "deleted"
+      ? `Deleted the ${fmtWeight(c.weight.weightKg, c.weight.unit)} weigh-in.`
+      : `${c.kind === "created" ? "Logged" : "Updated"} weight ${fmtWeight(c.weight.weightKg, c.weight.unit)}.`,
+  );
   const lines = r.changes.map((c) => {
     const verb =
       c.kind === "created"
@@ -411,6 +432,7 @@ function replySummary(r: AgentResult): string {
       ? `${verb} "${c.meal.description}".`
       : `${verb} "${c.meal.description}" (${c.meal.kcal} kcal).`;
   });
+  lines.push(...weights);
   if (r.error) lines.push(`(OpenRouter error: ${r.error.message})`);
   else if (r.reply) lines.push(r.reply);
   return lines.join(" ");
@@ -421,7 +443,7 @@ async function rememberReply(ctx: Ctx, sent: unknown, summary: string) {
   if (id && summary) await ctx.db.messages.rememberReply(id, summary);
 }
 
-async function resultView(
+export async function resultView(
   ctx: Ctx,
   r: AgentResult,
   custom: boolean,
@@ -443,7 +465,21 @@ async function resultView(
     return `${head}\n\n${mealBody(c.meal)}${was?.length ? `\n${was.join(" ")}` : ""}`;
   };
 
-  const parts = r.changes.map(card);
+  const unit = unitFor(ctx.user.units);
+  const weightCard = ({ kind, weight: w, before }: WeightChange) => {
+    const value = (kg: number, entered: typeof w.unit) =>
+      `${fmtWeight(kg, unit)}${entered !== unit ? ` (${fmtWeight(kg, entered)})` : ""}`;
+    if (kind === "deleted")
+      return `Deleted the weigh-in of <b>${value(w.weightKg, w.unit)}</b>.`;
+    const at = `${dayLabel(w.weighedAt, ctx.user)}  ${clock(w.weighedAt, ctx.user)}`;
+    const was =
+      before && before.weightKg !== w.weightKg
+        ? `\nWas ${fmtWeight(before.weightKg, unit)}.`
+        : "";
+    return `${kind === "created" ? "Weight logged" : "Weight updated"}: <b>${value(w.weightKg, w.unit)}</b>  ·  ${at}${was}`;
+  };
+
+  const parts = [...r.changes.map(card), ...r.weightChanges.map(weightCard)];
   if (r.error)
     parts.push(
       custom ? customProviderMessage(r.error) : openRouterMessage(r.error),
@@ -456,21 +492,28 @@ async function resultView(
   if (!parts.length)
     parts.push("I couldn't do anything with that. " + LOG_HINT);
 
-  if (!r.changes.length) return { text: parts.join("\n\n"), keyboard: [] };
-  const today = sumTotals(
-    await ctx.db.meals.since(dayStart(ctx.user.utcOffsetMinutes)),
-  );
-  parts.push(
-    `Today  ${num(today.kcal)}${ctx.user.targetKcal ? ` / ${num(ctx.user.targetKcal)}` : ""} kcal`,
-  );
+  if (!r.changes.length && !r.weightChanges.length)
+    return { text: parts.join("\n\n"), keyboard: [] };
+  if (r.changes.length) {
+    const today = sumTotals(
+      await ctx.db.meals.since(dayStart(ctx.user.utcOffsetMinutes)),
+    );
+    const target = ctx.user.targetKcal;
+    parts.push(
+      `Today  ${num(today.kcal)}${target ? ` / ${num(target)}` : ""} kcal${target ? `  ·  ${kcalLeft(today.kcal, target)}` : ""}`,
+    );
+  }
   const fixable = r.changes.findLast((c) => c.kind !== "deleted");
+  const undoable =
+    r.changes.length || r.weightChanges.some((c) => c.kind === "created");
   return {
     text: truncateHtml(parts.join("\n\n")),
     keyboard: [
       [
-        btn("Undo", `undo:${r.batchId}`),
+        ...(undoable ? [btn("Undo", `undo:${r.batchId}`)] : []),
         ...(fixable ? [btn("Fix", `fix:${fixable.meal.id}`)] : []),
-        btn("Today", "today"),
+        ...(r.changes.length ? [btn("Today", "today")] : []),
+        ...(r.weightChanges.length ? [btn("Weight", "wt:0")] : []),
       ],
     ],
   };

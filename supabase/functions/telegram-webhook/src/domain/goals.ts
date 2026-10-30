@@ -45,7 +45,8 @@ export const GOAL_FIELDS: Record<
   },
 };
 
-export const isGoalField = (s: string): s is GoalField => s in GOAL_FIELDS;
+export const isGoalField = (s: string): s is GoalField =>
+  Object.hasOwn(GOAL_FIELDS, s);
 
 export function clampGoal(field: GoalField, value: number): number {
   const f = GOAL_FIELDS[field];

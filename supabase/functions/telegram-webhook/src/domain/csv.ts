@@ -109,7 +109,7 @@ function parseRow(get: (name: string) => string): ImportedMeal | null {
     "protein_g",
     "carbs_g",
     "fat_g",
-  ].map((c) => Number(get(c)));
+  ].map((c) => (get(c) === "" ? NaN : Number(get(c))));
   const valid = (d: Date) =>
     !isNaN(d.getTime()) && d.getTime() <= Date.now() + 86_400_000;
   if (!valid(eatenAt) || !valid(loggedAt) || !description) return null;

@@ -1,7 +1,7 @@
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { config } from "../config.ts";
-import type { Meal } from "../db/index.ts";
+import type { Meal, Weight } from "../db/index.ts";
 import { countryName } from "../domain/countries.ts";
 import type { QuestionAnswer } from "../domain/question.ts";
 import { isoOffset, localIso, localStamp } from "../domain/time.ts";
@@ -24,9 +24,11 @@ import {
   mealTools,
   PhotoLibrary,
   RunState,
+  WeightChange,
+  WeightStore,
 } from "./tools.ts";
 
-export type { Change } from "./tools.ts";
+export type { Change, WeightChange } from "./tools.ts";
 
 export type AgentUser = {
   utcOffsetMinutes: number;
@@ -49,6 +51,9 @@ export type AgentInput = {
   unsupported: string[];
   user: AgentUser;
   store: MealStore;
+  weights: WeightStore;
+  /** Latest weigh-ins, newest first. */
+  recentWeights: Weight[];
   text: string;
   media: Media[];
   /** Telegram file ids of this message's photos. */
@@ -79,6 +84,7 @@ export type AgentInput = {
 export type AgentResult = {
   reply: string;
   changes: Change[];
+  weightChanges: WeightChange[];
   batchId: string;
   question: { question: string; options: string[] } | null;
   error: ProviderError | null;
@@ -124,6 +130,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   );
   const run = new RunState({
     store: input.store,
+    weights: input.weights,
     offsetMin: off,
     sentAt: input.sentAt,
     userText: input.text || null,
@@ -148,6 +155,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       : null,
     recentMeals: await run.views(input.recentMeals),
     fixMeal: input.fixMeal && (await run.view(input.fixMeal)),
+    recentWeights: input.recentWeights.map((w) => run.weightView(w)),
     answers: input.answers,
     canAsk,
     canResearch: research != null,
@@ -219,6 +227,8 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       if (message.stopReason === "error" || message.stopReason === "aborted")
         return;
       const failed = toolResults.some((r) => r.isError);
+      // A reply sent next to a failed call may describe a change that didn't happen.
+      if (failed) run.replyText = null;
       if (run.question || turns >= config.agent.maxTurns)
         return { action: "end" };
       if (run.replyText !== null && !failed) return { action: "end" };
@@ -284,6 +294,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   return {
     reply,
     changes: [...run.changes.values()],
+    weightChanges: [...run.weightChanges.values()],
     batchId: run.batchId,
     question: run.question,
     error: errorMessage && !timedOut ? parseProviderError(errorMessage) : null,

@@ -23,7 +23,6 @@ export const COUNTRIES: Record<string, string> = {
   BE: "Belgium",
   BZ: "Belize",
   BJ: "Benin",
-  DY: "Benin",
   BM: "Bermuda",
   BT: "Bhutan",
   BO: "Bolivia",
@@ -34,7 +33,6 @@ export const COUNTRIES: Record<string, string> = {
   BN: "Brunei",
   BG: "Bulgaria",
   BF: "Burkina Faso",
-  HV: "Burkina Faso",
   BI: "Burundi",
   KH: "Cambodia",
   CM: "Cameroon",
@@ -233,28 +231,37 @@ export const COUNTRIES: Record<string, string> = {
   UA: "Ukraine",
   AE: "United Arab Emirates",
   GB: "United Kingdom",
-  UK: "United Kingdom",
   US: "United States",
   UY: "Uruguay",
   UZ: "Uzbekistan",
-  NH: "Vanuatu",
   VU: "Vanuatu",
   VA: "Vatican City",
   VE: "Venezuela",
-  VD: "Vietnam",
   VN: "Vietnam",
   WF: "Wallis & Futuna",
   EH: "Western Sahara",
   YE: "Yemen",
   ZM: "Zambia",
-  RH: "Zimbabwe",
   ZW: "Zimbabwe",
+};
+
+/** Retired codes that were once offered, mapped to the current ones so a saved choice still resolves. */
+const RETIRED: Record<string, string> = {
+  DY: "BJ",
+  HV: "BF",
+  UK: "GB",
+  NH: "VU",
+  VD: "VN",
+  RH: "ZW",
 };
 
 export const isCountry = (code: string) => Object.hasOwn(COUNTRIES, code);
 
-export const countryName = (code: string | null) =>
-  code && isCountry(code) ? COUNTRIES[code] : null;
+export function countryName(code: string | null): string | null {
+  if (!code) return null;
+  const current = Object.hasOwn(RETIRED, code) ? RETIRED[code] : code;
+  return isCountry(current) ? COUNTRIES[current] : null;
+}
 
 /** "Åland Islands" → "A". */
 const initial = (name: string) => name.normalize("NFD").charAt(0).toUpperCase();

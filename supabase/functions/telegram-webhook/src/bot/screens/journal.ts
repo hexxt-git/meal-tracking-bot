@@ -6,7 +6,9 @@ import {
   groupByLocalDay,
   localDayLabel,
   localTime,
+  weekStartDaysAgo,
 } from "../../domain/time.ts";
+import { fmtWeight, unitFor } from "../../domain/weight.ts";
 import { esc, telegram } from "../../telegram/api.ts";
 import type { FileRef } from "../../telegram/types.ts";
 import type { Ctx } from "../context.ts";
@@ -58,12 +60,19 @@ export async function dayView(ctx: Ctx, daysAgo: number): Promise<View> {
   };
 }
 
-export async function weekView(ctx: Ctx): Promise<View> {
+/** Sunday to Saturday; the current week lists days up to today. */
+export async function weekView(ctx: Ctx, weeksAgo = 0): Promise<View> {
   const off = ctx.user.utcOffsetMinutes;
-  const days = groupByLocalDay(await ctx.db.meals.since(dayStart(off, 6)), off);
+  const first = weekStartDaysAgo(off, weeksAgo);
+  const last = Math.max(0, first - 6);
+  const from = dayStart(off, first);
+  const days = groupByLocalDay(
+    await ctx.db.meals.between(from, dayStart(off, last - 1)),
+    off,
+  );
   const goal = ctx.user.targetKcal;
   const lines: string[][] = [];
-  for (let i = 6; i >= 0; i--) {
+  for (let i = first; i >= last; i--) {
     const start = dayStart(off, i);
     const meals = days.get(localTime(start, off).slice(0, 10)) ?? [];
     const kcal = sumTotals(meals).kcal;
@@ -81,10 +90,19 @@ export async function weekView(ctx: Ctx): Promise<View> {
     : 0;
   const summary = logged.length
     ? `Average ${num(avg)} kcal over ${logged.length} logged day${logged.length > 1 ? "s" : ""}${goal ? `  ·  goal ${num(goal)}` : ""}`
-    : "Nothing logged in the last 7 days.";
+    : "Nothing logged this week.";
+  const name =
+    weeksAgo === 0 ? "This week" : weeksAgo === 1 ? "Last week" : "Week";
+  const range = `${localDayLabel(from, off).slice(4)} – ${localDayLabel(dayStart(off, first - 6), off).slice(4)}`;
   return {
-    text: `<b>Last 7 days</b>\n\n${table(lines, ["l", "r", "l"])}${summary}`,
-    keyboard: [[btn("Today", "day:0"), btn("Menu", "menu")]],
+    text: `<b>${name}</b>  ·  ${range}\n\n${table(lines, ["l", "r", "l"])}${summary}`,
+    keyboard: [
+      [
+        btn("‹ Previous week", `week:${weeksAgo + 1}`),
+        ...(weeksAgo > 0 ? [btn("Next week ›", `week:${weeksAgo - 1}`)] : []),
+      ],
+      [btn("Today", "day:0"), btn("Menu", "menu")],
+    ],
   };
 }
 
@@ -171,8 +189,15 @@ export async function undo(
   origin: Origin | undefined,
 ): Promise<Reply> {
   const results = await ctx.db.meals.undo(batchId);
-  if (!results.length) return { toast: "Already undone" };
+  const weights = origin ? [] : await ctx.db.weights.undo(batchId);
+  if (!results.length && !weights.length) return { toast: "Already undone" };
   if (origin) return { view: await mealView(ctx, results[0].mealId, origin) };
+  if (weights.length) {
+    const [latest] = await ctx.db.weights.recent(1);
+    if (latest)
+      ctx.user = await ctx.db.users.update({ weightKg: latest.weightKg });
+  }
+  const unit = unitFor(ctx.user.units);
   // Results run newest first, so the last entry per meal is the state it was reverted to.
   const outcome = new Map(results.map((r) => [r.mealId, r]));
   const lines =
@@ -183,8 +208,21 @@ export async function undo(
             ? `Restored <b>${esc(r.description)}</b> to its previous version.`
             : `Removed <b>${esc(r.description)}</b>.`,
         );
+  lines.push(
+    ...weights.map(
+      (w) => `Removed the weigh-in of <b>${fmtWeight(w.weightKg, unit)}</b>.`,
+    ),
+  );
   return {
-    view: { text: lines.join("\n"), keyboard: [[btn("Today", "today")]] },
+    view: {
+      text: lines.join("\n"),
+      keyboard: [
+        [
+          ...(results.length ? [btn("Today", "today")] : []),
+          ...(weights.length ? [btn("Weight", "wt:0")] : []),
+        ],
+      ],
+    },
   };
 }
 

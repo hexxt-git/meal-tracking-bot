@@ -19,6 +19,7 @@ import type { Step, Units } from "../domain/onboarding.ts";
 import type { AiSettings, AwaitingInput } from "../domain/ai-settings.ts";
 import type { PendingQuestion, SavedRun } from "../domain/question.ts";
 import type { Activity, Objective, Sex } from "../domain/nutrition.ts";
+import type { WeightUnit } from "../domain/weight.ts";
 
 const app = pgSchema("app");
 
@@ -157,6 +158,23 @@ export const photos = app.table(
     unique().on(t.tgId, t.fileId),
   ],
 );
+
+export const bodyWeights = app.table("body_weights", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tgId: tgId(),
+  weighedAt: tstz("weighed_at").notNull().defaultNow(),
+  weightKg: decimal("weight_kg").notNull(),
+  unit: text("unit").$type<WeightUnit>().notNull().default("kg"),
+  batchId: uuid("batch_id"),
+  sourceMessageId: bigint("source_message_id", { mode: "number" }),
+  createdAt: tstz("created_at").notNull().defaultNow(),
+});
+
+export type Weight = typeof bodyWeights.$inferSelect;
+export type NewWeight = Omit<
+  typeof bodyWeights.$inferInsert,
+  "id" | "tgId" | "createdAt"
+>;
 
 export type User = typeof users.$inferSelect;
 export type UserPatch = Partial<

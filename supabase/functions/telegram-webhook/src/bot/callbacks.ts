@@ -35,6 +35,7 @@ import {
   startProfile,
   stepView,
 } from "./screens/onboarding.ts";
+import { deleteWeight, weightEntryView, weightView } from "./screens/weight.ts";
 import type { Reply } from "./ui.ts";
 
 type Handler = (ctx: Ctx, args: string[]) => Promise<Reply> | Reply;
@@ -49,13 +50,18 @@ const HANDLERS: Record<string, Handler> = {
   day: async (ctx, [n]) => ({ view: await dayView(ctx, int(n)) }),
   /** From a meal reply: today's totals as a new message, leaving the reply as it is. */
   today: async (ctx) => ({ send: await dayView(ctx, 0) }),
-  week: async (ctx) => ({ view: await weekView(ctx) }),
+  week: async (ctx, [n]) => ({ view: await weekView(ctx, int(n)) }),
   hist: async (ctx, [page]) => ({ view: await historyView(ctx, int(page)) }),
   meal: async (ctx, [id, origin]) => ({
     view: await mealView(ctx, id, origin),
   }),
   del: (ctx, [id, origin]) => deleteMeal(ctx, id, origin),
   undo: (ctx, [batchId, origin]) => undo(ctx, batchId, origin),
+  wt: async (ctx, [page]) => ({ view: await weightView(ctx, int(page)) }),
+  wte: async (ctx, [id, page]) => ({
+    view: await weightEntryView(ctx, id, int(page)),
+  }),
+  wtd: (ctx, [id, page]) => deleteWeight(ctx, id, int(page)),
   csv: exportCsv,
   imp: () => ({ view: importHelpView() }),
 
@@ -111,7 +117,8 @@ export async function runCallback(ctx: Ctx, cb: CallbackQuery) {
   if (ctx.user.awaitingInput && !(kind === "prov" && args[0] === "in")) {
     ctx.user = await ctx.db.users.update({ awaitingInput: null });
   }
-  const reply = (await HANDLERS[kind]?.(ctx, args)) ?? {};
+  const handler = Object.hasOwn(HANDLERS, kind) ? HANDLERS[kind] : undefined;
+  const reply = (await handler?.(ctx, args)) ?? {};
   if (reply.view && cb.message)
     await telegram.edit(
       ctx.user.chatId,

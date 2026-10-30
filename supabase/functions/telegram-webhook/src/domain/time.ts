@@ -3,10 +3,13 @@ const DAY_MS = 86_400_000;
 /** Whole-hour zones first (UTC−12…+14), then the common fractional ones, so pickers can page through hours first. */
 export const TZ_OFFSETS = [
   ...Array.from({ length: 27 }, (_, i) => (i - 12) * 60),
+  -570,
+  -210,
   210,
   270,
   330,
   345,
+  390,
   570,
 ];
 
@@ -35,6 +38,16 @@ export function dayStart(
   const localMs = now + offsetMin * 60_000;
   const startLocal = Math.floor(localMs / DAY_MS) * DAY_MS - daysAgo * DAY_MS;
   return new Date(startLocal - offsetMin * 60_000);
+}
+
+/** How many days back the Sunday starting the week `weeksAgo` weeks before the current local week is. */
+export function weekStartDaysAgo(
+  offsetMin: number,
+  weeksAgo: number,
+  now = Date.now(),
+): number {
+  const weekday = new Date(now + offsetMin * 60_000).getUTCDay();
+  return weekday + 7 * weeksAgo;
 }
 
 /** Accepts an AI-provided timestamp only if it's within the last `maxAgeDays` days and not in the future. */

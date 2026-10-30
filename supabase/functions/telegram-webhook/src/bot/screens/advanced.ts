@@ -178,7 +178,9 @@ export async function advancedAction(
     await save(ctx, (s) => ({ ...DEFAULT_SETTINGS, custom: s.custom }));
     return { view: advancedView(ctx), toast: "Reset to defaults" };
   }
-  const screen = field ? CHOICES[field] : undefined;
+  const screen = Object.hasOwn(CHOICES, field ?? "")
+    ? CHOICES[field]
+    : undefined;
   if (!screen) return { view: advancedView(ctx) };
   const s = settingsOf(ctx);
   if (value !== undefined) {
@@ -312,7 +314,7 @@ export async function providerAction(
   const c = settingsOf(ctx).custom;
   switch (action) {
     case "in": {
-      if (!(arg in PROMPTS)) return {};
+      if (!Object.hasOwn(PROMPTS, arg ?? "")) return {};
       ctx.user = await ctx.db.users.update({
         awaitingInput: {
           field: arg as InputField,
