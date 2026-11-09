@@ -210,7 +210,8 @@ export async function undo(
         );
   lines.push(
     ...weights.map(
-      (w) => `Removed the weigh-in of <b>${fmtWeight(w.weightKg, unit)}</b>.`,
+      (w) =>
+        `Removed the weigh-in of <b>${fmtWeight(w.weightKg, unit, w.unit)}</b>.`,
     ),
   );
   return {

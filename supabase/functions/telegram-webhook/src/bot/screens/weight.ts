@@ -24,7 +24,7 @@ export async function weightView(ctx: Ctx, page: number): Promise<View> {
   const keyboard = [
     ...weights.map((w) => [
       btn(
-        `${dayLabel(w.weighedAt, ctx.user)}  ${clock(w.weighedAt, ctx.user)}  ·  ${fmtWeight(w.weightKg, unit)}`,
+        `${dayLabel(w.weighedAt, ctx.user)}  ${clock(w.weighedAt, ctx.user)}  ·  ${fmtWeight(w.weightKg, unit, w.unit)}`,
         `wte:${w.id}:${page}`,
       ),
     ]),
@@ -43,7 +43,7 @@ export async function weightView(ctx: Ctx, page: number): Promise<View> {
   const rows = [
     [
       "Latest",
-      `${fmtWeight(latest.weightKg, unit)}  (${dayLabel(latest.weighedAt, ctx.user)})`,
+      `${fmtWeight(latest.weightKg, unit, latest.unit)}  (${dayLabel(latest.weighedAt, ctx.user)})`,
     ],
     ...TREND_DAYS.map((days) => {
       const delta = weightChange(history, days, off);
@@ -71,7 +71,7 @@ export async function weightEntryView(
     return { text: "This weigh-in no longer exists.", keyboard: [[back]] };
   const unit = unitFor(ctx.user.units);
   return {
-    text: `<b>${fmtWeight(w.weightKg, unit)}</b>${w.unit !== unit ? `  (${fmtWeight(w.weightKg, w.unit)})` : ""}\n${dayLabel(w.weighedAt, ctx.user)}  ${clock(w.weighedAt, ctx.user)}`,
+    text: `<b>${fmtWeight(w.weightKg, unit, w.unit)}</b>${w.unit !== unit ? `  (${fmtWeight(w.weightKg, w.unit, w.unit)})` : ""}\n${dayLabel(w.weighedAt, ctx.user)}  ${clock(w.weighedAt, ctx.user)}`,
     keyboard: [[btn("Delete", `wtd:${w.id}:${page}`), back]],
   };
 }

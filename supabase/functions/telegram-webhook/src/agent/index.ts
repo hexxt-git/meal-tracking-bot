@@ -38,6 +38,8 @@ export type AgentUser = {
   targetProteinG: number | null;
   targetCarbsG: number | null;
   targetFatG: number | null;
+  objective?: string | null;
+  paceKgPerWeek?: string | number | null;
 };
 
 export type AgentInput = {
@@ -159,6 +161,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     targets: u.targetKcal
       ? `${u.targetKcal} kcal, protein ${u.targetProteinG} g, carbs ${u.targetCarbsG} g, fat ${u.targetFatG} g`
       : null,
+    goal: goalText(u),
     recentMeals: await run.views(input.recentMeals),
     fixMeal: input.fixMeal && (await run.view(input.fixMeal)),
     recentWeights: input.recentWeights.map((w) => run.weightView(w)),
@@ -298,4 +301,13 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     hitCostCap: costUsd >= config.agent.maxRunCostUsd,
     generationIds,
   };
+}
+
+function goalText(u: AgentUser): string | null {
+  const pace = Number(u.paceKgPerWeek);
+  const rate = pace > 0 ? ` ${pace} kg/week` : "";
+  if (u.objective === "gain") return `gain weight${rate}`;
+  if (u.objective === "lose") return `lose weight${rate}`;
+  if (u.objective === "maintain") return "maintain weight";
+  return null;
 }

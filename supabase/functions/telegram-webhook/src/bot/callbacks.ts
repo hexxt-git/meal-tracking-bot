@@ -38,7 +38,11 @@ import {
 import { deleteWeight, weightEntryView, weightView } from "./screens/weight.ts";
 import type { Reply } from "./ui.ts";
 
-type Handler = (ctx: Ctx, args: string[]) => Promise<Reply> | Reply;
+type Handler = (
+  ctx: Ctx,
+  args: string[],
+  cb: CallbackQuery,
+) => Promise<Reply> | Reply;
 
 const int = (s: string | undefined) =>
   Math.max(0, Number.parseInt(s ?? "0", 10) || 0);
@@ -118,7 +122,7 @@ export async function runCallback(ctx: Ctx, cb: CallbackQuery) {
     ctx.user = await ctx.db.users.update({ awaitingInput: null });
   }
   const handler = Object.hasOwn(HANDLERS, kind) ? HANDLERS[kind] : undefined;
-  const reply = (await handler?.(ctx, args)) ?? {};
+  const reply = (await handler?.(ctx, args, cb)) ?? {};
   if (reply.view && cb.message)
     await telegram.edit(
       ctx.user.chatId,

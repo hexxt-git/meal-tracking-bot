@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { mealTools, RunOptions, RunState } from "../src/agent/tools.ts";
 import { fakeDb, meal } from "./support/fakes.ts";
@@ -289,3 +294,23 @@ Deno.test(
     assertEquals([...run.changes.values()][0].before?.eatenAt, m.eatenAt);
   },
 );
+
+Deno.test("research without sources comes back with a warning", async () => {
+  let sources: string[] = [];
+  const { call } = setup({
+    research: () =>
+      Promise.resolve({ answer: "100 kcal", sources, costUsd: 0 }),
+    maxResearch: 2,
+  });
+  const result = async (q: string) =>
+    JSON.parse(
+      (
+        (await call("research_food", { query: q })).content[0] as {
+          text: string;
+        }
+      ).text,
+    );
+  assertStringIncludes((await result("a")).warning, "No web sources");
+  sources = ["https://example.com"];
+  assertEquals((await result("b")).warning, undefined);
+});

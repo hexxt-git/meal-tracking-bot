@@ -10,6 +10,8 @@ export type PromptContext = {
   country: string | null;
   units: string;
   targets: string | null;
+  /** e.g. "gain weight 0.25 kg/week". */
+  goal?: string | null;
   /** Meals logged in the last day, as the read tools return them. */
   recentMeals: unknown[];
   fixMeal: unknown | null;
@@ -73,14 +75,15 @@ export function systemPrompt(c: PromptContext): string {
 - Before logging a branded, packaged or restaurant/chain item, call research_food for it, unless a nutrition label is readable in the photo or the same product is already in the meals below (then reuse those numbers).
 - One precise query per product: brand, product, variant, pack size if visible${c.country ? `; it's searched as sold in ${c.country}` : ""}. When the pack size isn't readable, ask for the product's pack sizes in the same query so you can match the package in the photo.
 - Research costs the user money: never for plain whole foods (fruit, eggs, rice, plain bread) or home-cooked dishes; never twice for the same thing.
-- Use the numbers it returns, scaled to the portion eaten. If it finds nothing, estimate from the closest comparable product and say so.`
+- Use the numbers it returns, scaled to the portion eaten. If it finds nothing, estimate from the closest comparable product and say so.
+- Research can be wrong, especially when it returns no sources. Check its answer against the photo and the user's words (product type, packaging, flavour, size); when they disagree, trust the photo, label and user, not the research.`
     : `RESEARCH
 - Web research is unavailable right now. Use labels in photos, matching meals below, or your best estimate, and say when numbers are estimated.`;
 
   const asking = c.canAsk
     ? `ASKING (only when strictly necessary)
 - Call ask_user only when an unknown would change calories by more than about 20% (or 100 kcal) and no reasonable default exists, e.g. how much of a large bag or shared plate was eaten. Otherwise assume the likely answer and state it.
-- Research first, then ask, before logging anything. 2 to 4 short options (max 30 characters each); the user can also type an answer.`
+- Research first, then ask, before logging anything. 2 to 4 short options (max 30 characters each); the user can also type an answer. When options lead to very different totals, put the kcal in each (e.g. "Whole cake, ~6800 kcal").`
     : `ASKING
 - No more questions for this message. Make the most reasonable assumption and state it.`;
 
@@ -89,6 +92,10 @@ export function systemPrompt(c: PromptContext): string {
 CONTEXT
 - Now: ${c.now} (UTC${c.offset}) = ${c.nowIso}, when the user sent the message.
 - Country: ${c.country ?? "not set"}. Units: ${c.units}.${c.targets ? ` Daily targets: ${c.targets}.` : ""}${
+    c.goal
+      ? `\n- The user's goal: ${c.goal}. Judge progress against it: when gaining, eating under the kcal target or losing weight is off track; when losing, the reverse.`
+      : ""
+  }${
     c.photoIds.length
       ? `\n- This message's photos (ids ${c.photoIds.join(", ")}) are attached to the user turn. Look at every one carefully and log only what they show or the user says.`
       : ""
@@ -119,6 +126,7 @@ ESTIMATION
 - Portions are the biggest source of error, so work them out instead of guessing: scale each food against things of known size in the photo (plate about 26 cm, fork about 19 cm, hand, can 330 ml, bottle, bread slice, egg) and against each other, and think about the food's depth, not only the area it covers.
 - For packaged food the package is the portion unless the user says otherwise: read the size from the label, or get the exact package size with research_food; don't assume a generic size when the real one can be found.
 - Numbers are per item; kcal ≈ 4P + 4C + 9F. description: a short title for the whole meal.
+- Sanity-check before logging: a single item over about 2000 kcal, or far more than one person eats in a sitting, usually means a misread size or unit. Ask, or when you can't ask, take the plausible reading and say so.
 
 ${asking}
 

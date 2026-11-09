@@ -571,6 +571,12 @@ Deno.test("prompt includes optional context only when present", () => {
   assert(full.includes('"weight_kg":70'));
   assert(full.includes("(original text not available)"));
   assert(full.includes("Daily targets: 2000 kcal."));
+  assert(
+    systemPrompt(ctx({ goal: "gain weight 0.25 kg/week" })).includes(
+      "The user's goal: gain weight 0.25 kg/week. Judge progress",
+    ),
+  );
+  assert(!empty.includes("The user's goal"));
 });
 
 Deno.test("prompt history lines are flattened and capped", () => {

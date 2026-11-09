@@ -1,6 +1,6 @@
 import { resetTelegram } from "./support/env.ts";
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { respond } from "../src/bot/assistant.ts";
+import { answerQuestion, respond } from "../src/bot/assistant.ts";
 import type { User } from "../src/db/index.ts";
 import type { Message } from "../src/telegram/types.ts";
 import type { View } from "../src/bot/ui.ts";
@@ -255,3 +255,29 @@ Deno.test(
     assertEquals(texts(sent).length, 2);
   },
 );
+
+Deno.test("a tapped answer is added to the stored question", async () => {
+  fakeModel([
+    [
+      {
+        name: "ask_user",
+        args: { question: "kg or lb?", options: ["kg", "lb"] },
+      },
+    ],
+    [
+      { name: "log_weight", args: { weight: 70, unit: "kg" } },
+      { name: "reply", args: { text: "Logged." } },
+    ],
+  ]);
+  const { ctx, state } = setup();
+  await respond(ctx, message("70"));
+  const q = ctx.user.pendingQuestion!;
+  const asked = state.replies.find((r) => r.text.startsWith("Asked:"))!;
+  const reply = answerQuestion(ctx, [q.id, "1"], {
+    id: "cb",
+    from: { id: 1 },
+    message: { message_id: asked.id, chat: { id: 1, type: "private" } },
+  });
+  await reply.after?.();
+  assertStringIncludes(asked.text, "-> User answered: lb");
+});

@@ -18,9 +18,15 @@ export const toKg = (value: number, unit: WeightUnit) =>
 export const fromKg = (kg: number, unit: WeightUnit) =>
   unit === "lb" ? kg * LB_PER_KG : kg;
 
-/** "70.0 kg" / "154.3 lb" */
-export const fmtWeight = (kg: number, unit: WeightUnit) =>
-  `${fromKg(kg, unit).toFixed(1)} ${unit}`;
+/** "70.0 kg" / "154.3 lb"; in the unit it was `entered` in, a second decimal is kept as typed ("62.65 kg"). */
+export const fmtWeight = (
+  kg: number,
+  unit: WeightUnit,
+  entered?: WeightUnit,
+) => {
+  const v = fromKg(kg, unit).toFixed(unit === entered ? 2 : 1);
+  return `${v.length > 2 && v.endsWith("0") && unit === entered ? v.slice(0, -1) : v} ${unit}`;
+};
 
 /** "-0.6 kg" / "+1.2 lb" */
 export function fmtWeightDelta(kg: number, unit: WeightUnit): string {

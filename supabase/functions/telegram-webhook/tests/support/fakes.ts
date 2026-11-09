@@ -240,6 +240,11 @@ export function fakeDb(
       state.replies.push({ id, text });
       return Promise.resolve();
     },
+    noteAnswer: (id: number, answer: string) => {
+      for (const r of state.replies)
+        if (r.id === id) r.text += ` -> User answered: ${answer}`;
+      return Promise.resolve();
+    },
     recent: () => Promise.resolve([]),
     addBatch: () => Promise.resolve(),
   };

@@ -489,7 +489,16 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
           const r = await research(p.query);
           run.researches++;
           run.researchCostUsd += r.costUsd;
-          return ok({ answer: r.answer, sources: r.sources.slice(0, 3) });
+          return ok({
+            answer: r.answer,
+            sources: r.sources.slice(0, 3),
+            ...(r.sources.length
+              ? {}
+              : {
+                  warning:
+                    "No web sources came back, so this may be from memory and wrong. Trust the photo and label over it.",
+                }),
+          });
         },
       }),
     );

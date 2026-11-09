@@ -40,6 +40,22 @@ export function messagesRepo(run: Run) {
           .onConflictDoNothing(),
       ),
 
+    /** Adds the option the user tapped to the stored question, so later runs see the answer. */
+    noteAnswer: (messageId: number, answer: string) =>
+      run((tx) =>
+        tx
+          .update(chatMessages)
+          .set({
+            text: sql`${chatMessages.text} || ${` -> User answered: ${answer}`}`,
+          })
+          .where(
+            and(
+              eq(chatMessages.messageId, messageId),
+              eq(chatMessages.role, "assistant"),
+            ),
+          ),
+      ),
+
     /** The latest `limit` messages from both sides, oldest first, leaving out `exceptIds`. */
     recent: (limit: number, exceptIds: number[]) =>
       run(async (tx) =>

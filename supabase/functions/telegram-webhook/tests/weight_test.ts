@@ -191,3 +191,10 @@ Deno.test("ask_user is refused after a weigh-in was logged", async () => {
     call("ask_user", { question: "kg or lb?", options: ["kg", "lb"] }),
   );
 });
+
+Deno.test("weights keep a typed second decimal only in their own unit", () => {
+  assertEquals(fmtWeight(62.65, "kg", "kg"), "62.65 kg");
+  assertEquals(fmtWeight(70, "kg", "kg"), "70.0 kg");
+  assertEquals(fmtWeight(62.7, "kg", "kg"), "62.7 kg");
+  assertEquals(fmtWeight(70, "lb", "kg"), "154.3 lb");
+});

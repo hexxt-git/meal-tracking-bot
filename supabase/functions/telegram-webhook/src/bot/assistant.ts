@@ -21,7 +21,7 @@ import { base64, Media, ProviderError } from "../services/llm.ts";
 import { resolveProviders } from "./providers.ts";
 import { RESEARCH, RESEARCH_CUTOFF_SHARE } from "../domain/ai-settings.ts";
 import { esc, fittedPhoto, telegram } from "../telegram/api.ts";
-import type { Message } from "../telegram/types.ts";
+import type { CallbackQuery, Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
 import { clock, dayLabel, kcalLeft, mealBody } from "./format.ts";
 import { welcomeView } from "./screens/onboarding.ts";
@@ -90,7 +90,11 @@ export async function respondToEdit(ctx: Ctx, msg: Message) {
 }
 
 /** `ask:<questionId>:<option>` */
-export function answerQuestion(ctx: Ctx, [id, index]: string[]): Reply {
+export function answerQuestion(
+  ctx: Ctx,
+  [id, index]: string[],
+  cb?: CallbackQuery,
+): Reply {
   const q = ctx.user.pendingQuestion;
   const answer = q?.options[Number(index)];
   if (
@@ -102,7 +106,11 @@ export function answerQuestion(ctx: Ctx, [id, index]: string[]): Reply {
   }
   return {
     view: { text: `${esc(q.question)}\n\n<b>${esc(answer)}</b>`, keyboard: [] },
-    after: () => resume(ctx, q, answer),
+    after: async () => {
+      if (cb?.message)
+        await ctx.db.messages.noteAnswer(cb.message.message_id, answer);
+      return resume(ctx, q, answer);
+    },
   };
 }
 
@@ -511,8 +519,8 @@ async function chatHistory(ctx: Ctx, currentMessageIds: number[]) {
 export function replySummary(r: AgentResult): string {
   const weights = r.weightChanges.map((c) =>
     c.kind === "deleted"
-      ? `Deleted the ${fmtWeight(c.weight.weightKg, c.weight.unit)} weigh-in.`
-      : `${c.kind === "created" ? "Logged" : "Updated"} weight ${fmtWeight(c.weight.weightKg, c.weight.unit)}.`,
+      ? `Deleted the ${fmtWeight(c.weight.weightKg, c.weight.unit, c.weight.unit)} weigh-in.`
+      : `${c.kind === "created" ? "Logged" : "Updated"} weight ${fmtWeight(c.weight.weightKg, c.weight.unit, c.weight.unit)}.`,
   );
   const lines = r.changes.map((c) => {
     const verb =
@@ -561,13 +569,13 @@ export async function resultView(
   const unit = unitFor(ctx.user.units);
   const weightCard = ({ kind, weight: w, before }: WeightChange) => {
     const value = (kg: number, entered: typeof w.unit) =>
-      `${fmtWeight(kg, unit)}${entered !== unit ? ` (${fmtWeight(kg, entered)})` : ""}`;
+      `${fmtWeight(kg, unit, entered)}${entered !== unit ? ` (${fmtWeight(kg, entered, entered)})` : ""}`;
     if (kind === "deleted")
       return `Deleted the weigh-in of <b>${value(w.weightKg, w.unit)}</b>.`;
     const at = `${dayLabel(w.weighedAt, ctx.user)}  ${clock(w.weighedAt, ctx.user)}`;
     const was =
       before && before.weightKg !== w.weightKg
-        ? `\nWas ${fmtWeight(before.weightKg, unit)}.`
+        ? `\nWas ${fmtWeight(before.weightKg, unit, before.unit)}.`
         : "";
     return `${kind === "created" ? "Weight logged" : "Weight updated"}: <b>${value(w.weightKg, w.unit)}</b>  ·  ${at}${was}`;
   };
