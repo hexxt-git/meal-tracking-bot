@@ -11,6 +11,7 @@ export type FileRef = {
   file_name?: string;
   file_size?: number;
 };
+export type PhotoSize = FileRef & { width: number; height: number };
 
 export type Message = {
   message_id: number;
@@ -23,7 +24,7 @@ export type Message = {
   text?: string;
   caption?: string;
   media_group_id?: string;
-  photo?: FileRef[];
+  photo?: PhotoSize[];
   document?: FileRef;
   voice?: FileRef;
   audio?: FileRef;

@@ -53,6 +53,7 @@ export type PhotoLibrary = {
 };
 
 export type RunOptions = {
+  batchId?: string;
   store: MealStore;
   weights: WeightStore;
   offsetMin: number;
@@ -74,7 +75,7 @@ export type RunOptions = {
 
 /** Everything the tools act on during one assistant run. */
 export class RunState {
-  readonly batchId = crypto.randomUUID();
+  readonly batchId: string;
   readonly changes = new Map<string, Change>();
   readonly weightChanges = new Map<string, WeightChange>();
   question: { question: string; options: string[] } | null = null;
@@ -85,6 +86,7 @@ export class RunState {
   private readonly photoIds = new Map<string, string>();
 
   constructor(readonly o: RunOptions) {
+    this.batchId = o.batchId ?? crypto.randomUUID();
     o.photos?.forEach((p, i) => {
       if (o.fileIds[i]) this.photoIds.set(o.fileIds[i], p.id);
     });
@@ -443,8 +445,8 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
         name: "view_image",
         label: "View image",
         description:
-          `Shows one photo the user sent, by its id: this message's photos (only attached to your first request) or ` +
-          `earlier ones from the conversation and meals. Costs money; at most ${maxViews} per message.`,
+          `Shows an earlier photo from the conversation or meals by its id (this message's photos are already attached). ` +
+          `Costs money; at most ${maxViews} per message.`,
         parameters: Type.Object({ image_id: Type.String() }),
         execute: async (_id, p) => {
           if (run.imageViews >= maxViews)

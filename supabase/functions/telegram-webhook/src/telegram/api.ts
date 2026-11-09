@@ -1,5 +1,5 @@
 import { config } from "../config.ts";
-import type { Keyboard } from "./types.ts";
+import type { Keyboard, PhotoSize } from "./types.ts";
 
 const API = `https://api.telegram.org/bot${config.telegramToken}`;
 
@@ -114,3 +114,13 @@ export const telegram = {
 
 export const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Telegram sends each photo in several sizes, smallest first; picks the largest within `maxPx` on its long side. */
+export function fittedPhoto(
+  sizes: PhotoSize[] | undefined,
+  maxPx = config.maxPhotoPx,
+): string | undefined {
+  if (!sizes?.length) return undefined;
+  const fits = sizes.filter((s) => Math.max(s.width, s.height) <= maxPx);
+  return (fits.at(-1) ?? sizes[0]).file_id;
+}

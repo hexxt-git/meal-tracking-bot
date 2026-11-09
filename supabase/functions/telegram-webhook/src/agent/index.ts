@@ -55,6 +55,8 @@ export type AgentInput = {
   /** Latest weigh-ins, newest first. */
   recentWeights: Weight[];
   text: string;
+  /** Messages sent right before this one that got no reply yet, oldest first; handled together with it. */
+  earlier?: { text: string; sentAt: Date }[];
   media: Media[];
   /** Telegram file ids of this message's photos. */
   photoIds: string[];
@@ -79,6 +81,10 @@ export type AgentInput = {
   edit?: { before: string | null; sentAt: Date; meals: Meal[] };
   /** Receives one line per tool call and result, for logs. */
   trace?: (line: string) => void;
+  /** Undo batch for every change the run makes; random when not given. */
+  batchId?: string;
+  /** Stops the run, e.g. once a newer message has taken it over. */
+  signal?: AbortSignal;
 };
 
 export type AgentResult = {
@@ -96,10 +102,6 @@ export type AgentResult = {
   hitCostCap: boolean;
   generationIds: string[];
 };
-
-const PHOTOS_REMOVED = (ids: string[]) =>
-  `[Photo${ids.length === 1 ? "" : "s"} ${ids.join(", ")} ${ids.length === 1 ? "was" : "were"} attached to your first request only. ` +
-  `Call view_image with an id to see one again.]`;
 
 export async function runAgent(input: AgentInput): Promise<AgentResult> {
   const u = input.user;
@@ -128,12 +130,16 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   const photos = images.flatMap((image, i) =>
     input.photoRefs[i] ? [{ id: input.photoRefs[i], image }] : [],
   );
+  const earlier = input.earlier ?? [];
   const run = new RunState({
+    batchId: input.batchId,
     store: input.store,
     weights: input.weights,
     offsetMin: off,
     sentAt: input.sentAt,
-    userText: input.text || null,
+    userText:
+      [...earlier.map((m) => m.text), input.text].filter(Boolean).join("\n") ||
+      null,
     fileIds: input.photoIds,
     messageId: input.messageId,
     photos,
@@ -162,6 +168,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     photoIds: photos.map((p) => p.id),
     replyDetail: input.replyDetail,
     unsupported: input.unsupported,
+    messagesInTurn: earlier.length + 1,
     history: input.history.map((h) => ({
       who: h.role === "user" ? "User" : "You",
       at: localStamp(h.at, off),
@@ -196,31 +203,6 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
         );
       },
     ),
-    // Photos are sent with the first request only; later requests get a note and can call view_image.
-    transformContext: (messages) => {
-      if (!images.length || !messages.some((m) => m.role === "assistant"))
-        return Promise.resolve(messages);
-      return Promise.resolve(
-        messages.map((m) => {
-          if (
-            m.role !== "user" ||
-            typeof m.content === "string" ||
-            !m.content.some((c) => c.type === "image")
-          )
-            return m;
-          return {
-            ...m,
-            content: [
-              ...m.content.filter((c) => c.type !== "image"),
-              {
-                type: "text" as const,
-                text: PHOTOS_REMOVED(photos.map((p) => p.id)),
-              },
-            ],
-          };
-        }),
-      );
-    },
     toolExecution: "sequential",
     finishTurn: ({ message, toolResults }) => {
       turns++;
@@ -254,14 +236,24 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     timedOut = true;
     agent.abort();
   }, config.agent.timeoutMs);
+  const stop = () => agent.abort();
+  input.signal?.addEventListener("abort", stop);
+  const text = earlier.length
+    ? [...earlier, { text: input.text, sentAt: input.sentAt }]
+        .map((m) => `[${localStamp(m.sentAt, off)}] ${m.text || "(no text)"}`)
+        .join("\n")
+    : input.text || "(no text)";
   try {
+    if (input.signal?.aborted) throw new Error("run was stopped");
     await agent.prompt(
-      input.edit ? `(edited message) ${input.text}` : input.text || "(no text)",
+      input.edit ? `(edited message) ${input.text}` : text,
       images,
     );
     for (
       let retry = 0;
-      retry < config.agent.transientRetries && !timedOut;
+      retry < config.agent.transientRetries &&
+      !timedOut &&
+      !input.signal?.aborted;
       retry++
     ) {
       const failed = agent.state.messages.at(-1);
@@ -279,6 +271,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     }
   } finally {
     clearTimeout(timer);
+    input.signal?.removeEventListener("abort", stop);
   }
 
   const assistant = agent.state.messages.filter((m) => m.role === "assistant");

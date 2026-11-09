@@ -269,3 +269,24 @@ Deno.test(
     assertEquals(r.reply, "");
   },
 );
+
+Deno.test(
+  "this message's photos stay in every request of the run",
+  async () => {
+    const seen = fakeModel([
+      [{ name: "read_meals", args: { days_back: 0 } }],
+      [{ name: "reply", args: { text: "Done." } }],
+    ]);
+    const { input: i } = input({
+      provider: { ...provider, images: true },
+      text: "dinner",
+      media: [{ kind: "image", mime: "image/jpeg", data: new Uint8Array([1]) }],
+      photoIds: ["file1"],
+      photoRefs: ["p1"],
+    });
+    const r = await runAgent(i);
+    assertEquals(r.turns, 2);
+    for (const req of seen)
+      assert(JSON.stringify(req.body.messages).includes("image_url"));
+  },
+);

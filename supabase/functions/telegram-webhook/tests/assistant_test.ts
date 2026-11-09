@@ -177,3 +177,81 @@ Deno.test("a transient failure with nothing saved offers Retry", async () => {
   const last = sent.at(-1) as View;
   assert(buttons(last)[0][0].startsWith("retry:"));
 });
+
+const meal = (name: string, kcal: number) => ({
+  name: "log_meal",
+  args: {
+    description: name,
+    items: [
+      {
+        name,
+        portion: "1 serving",
+        kcal,
+        protein_g: 10,
+        carbs_g: 10,
+        fat_g: 5,
+      },
+    ],
+  },
+});
+
+const until = async (cond: () => boolean) => {
+  while (!cond()) await new Promise((r) => setTimeout(r, 10));
+};
+
+Deno.test(
+  "a message sent before the reply takes over the running request, so nothing is logged twice",
+  async () => {
+    const seen = fakeModel([
+      [meal("Chicken", 300)],
+      "hang",
+      [
+        meal("Chicken", 300),
+        meal("Rice", 200),
+        { name: "reply", args: { text: "Logged both." } },
+      ],
+    ]);
+    const { ctx, state, sent } = setup();
+    const first = respond(ctx, message("chicken"));
+    await until(() => seen.length === 2);
+    assertEquals(state.meals.length, 1, "the first run logged chicken");
+    await Promise.all([first, respond(ctx, message("and rice"))]);
+
+    assertEquals(state.meals.map((m) => m.description).sort(), [
+      "Chicken",
+      "Rice",
+    ]);
+    assertEquals(sent.length, 1, "only the newer run replies");
+    assertStringIncludes(texts(sent)[0], "Logged both.");
+    const userTurn = JSON.stringify(seen[2].body.messages);
+    assertStringIncludes(userTurn, "chicken");
+    assertStringIncludes(userTurn, "and rice");
+    assertStringIncludes(userTurn, "2 messages in a row");
+    assertEquals(state.user.agentRun, null, "the slot is released");
+  },
+);
+
+Deno.test(
+  "a message sent while a reply is going out waits for it instead of undoing it",
+  async () => {
+    fakeModel([
+      [meal("Chicken", 300), { name: "reply", args: { text: "Chicken." } }],
+      [meal("Rice", 200), { name: "reply", args: { text: "Rice." } }],
+    ]);
+    const { ctx, state, sent } = setup();
+    const commit = ctx.db.runs.commit;
+    let second: Promise<unknown> | undefined;
+    ctx.db.runs.commit = async (id) => {
+      const ok = await commit(id);
+      second ??= respond(ctx, message("rice"));
+      return ok;
+    };
+    await respond(ctx, message("chicken"));
+    await second;
+    assertEquals(state.meals.map((m) => m.description).sort(), [
+      "Chicken",
+      "Rice",
+    ]);
+    assertEquals(texts(sent).length, 2);
+  },
+);

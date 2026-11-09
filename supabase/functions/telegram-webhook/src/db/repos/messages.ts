@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, notInArray, sql } from "drizzle-orm";
 import type { Run } from "../client.ts";
 import { chatMessages } from "../schema.ts";
 
@@ -40,14 +40,14 @@ export function messagesRepo(run: Run) {
           .onConflictDoNothing(),
       ),
 
-    /** The latest `limit` messages from both sides, oldest first, leaving out `exceptId`. */
-    recent: (limit: number, exceptId: number) =>
+    /** The latest `limit` messages from both sides, oldest first, leaving out `exceptIds`. */
+    recent: (limit: number, exceptIds: number[]) =>
       run(async (tx) =>
         (
           await tx
             .select()
             .from(chatMessages)
-            .where(ne(chatMessages.messageId, exceptId))
+            .where(notInArray(chatMessages.messageId, exceptIds))
             .orderBy(desc(chatMessages.createdAt))
             .limit(limit)
         ).reverse(),

@@ -23,6 +23,8 @@ export type PromptContext = {
   replyDetail: ReplyDetail;
   /** Attachments of this message the model can't receive. */
   unsupported: string[];
+  /** How many messages the user turn holds; more than one when the user sent several before a reply. */
+  messagesInTurn?: number;
   edit?: {
     before: string | null;
     after: string;
@@ -88,11 +90,15 @@ CONTEXT
 - Now: ${c.now} (UTC${c.offset}) = ${c.nowIso}, when the user sent the message.
 - Country: ${c.country ?? "not set"}. Units: ${c.units}.${c.targets ? ` Daily targets: ${c.targets}.` : ""}${
     c.photoIds.length
-      ? `\n- This message's photos (ids ${c.photoIds.join(", ")}) are attached to your first request only. Look carefully then; call view_image only if you really need one again.`
+      ? `\n- This message's photos (ids ${c.photoIds.join(", ")}) are attached to the user turn. Look at every one carefully and log only what they show or the user says.`
       : ""
   }${
     c.unsupported.length
       ? `\n- The user attached ${c.unsupported.join(" and ")}, which the configured model can't receive. If you can't tell what they ate from the text, ask them to describe it in words; don't guess.`
+      : ""
+  }${
+    (c.messagesInTurn ?? 1) > 1
+      ? `\n- The user sent ${c.messagesInTurn} messages in a row before you replied; the user turn below has each with its time, and any photos belong to them together. Treat them as one request: handle everything they mention exactly once (later messages can add to or correct earlier ones). Nothing from them is logged yet.`
       : ""
   }
 

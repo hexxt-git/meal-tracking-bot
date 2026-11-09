@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { systemPrompt, PromptContext } from "../src/agent/prompt.ts";
+import { fittedPhoto } from "../src/telegram/api.ts";
 import {
   aiSettings,
   isAwaiting,
@@ -539,7 +540,7 @@ Deno.test("prompt includes optional context only when present", () => {
     'tapped "Fix"',
     "You already asked",
     "can't receive",
-    "attached to your first request",
+    "attached to the user turn",
   ])
     assert(!empty.includes(s), s);
   assert(empty.includes("LATEST WEIGH-INS (most recent first): (none)"));
@@ -589,4 +590,17 @@ Deno.test("prompt history lines are flattened and capped", () => {
   assert(line.startsWith("[t] User: a b x"));
   assert(line.endsWith(" [photo p1, voice note]"));
   assert(line.length < 650);
+});
+
+Deno.test("fittedPhoto picks the largest size within the limit", () => {
+  const size = (px: number) => ({
+    file_id: `f${px}`,
+    width: px,
+    height: (px * 3) / 4,
+  });
+  const sizes = [size(90), size(320), size(800), size(1280), size(2560)];
+  assertEquals(fittedPhoto(sizes, 1280), "f1280");
+  assertEquals(fittedPhoto(sizes.slice(0, 3), 1280), "f800");
+  assertEquals(fittedPhoto([size(2560)], 1280), "f2560");
+  assertEquals(fittedPhoto(undefined), undefined);
 });

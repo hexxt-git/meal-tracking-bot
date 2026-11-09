@@ -11,6 +11,8 @@ export const config = {
   cronSecret: env("CRON_SECRET"),
   databaseUrl: env("SUPABASE_DB_URL"),
   model: "google/gemini-3.8-flash",
+  /** Longest side of photos sent to the model. */
+  maxPhotoPx: 1280,
   limits: {
     messagesPerHour: 60,
     analysesPerDay: 300,
@@ -31,6 +33,10 @@ export const config = {
     maxQuestions: 2,
     /** A question left unanswered this long is dropped and the next message starts fresh. */
     questionTtlMs: 6 * 3_600_000,
+    /** A run slot older than this belongs to a run that died; a run ends within timeoutMs plus downloads and sends. */
+    runStaleMs: 150_000,
+    /** How often a run checks it still holds the slot, and a waiting message checks whether it's free. */
+    runPollMs: 1_000,
   },
   research: {
     /** OpenRouter search engine. "native" (Google Search for Gemini) measured $0.085 per search, too much for the budget. */

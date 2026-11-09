@@ -1,8 +1,8 @@
 import { setExternalFetch } from "./env.ts";
 
 type Call = { name: string; args: unknown };
-/** One scripted model turn: tool calls to make, or an HTTP error to return. */
-type Step = Call[] | { status: number; body: string };
+/** One scripted model turn: tool calls to make, an HTTP error to return, or a request that hangs until aborted. */
+type Step = Call[] | { status: number; body: string } | "hang";
 
 type Seen = { url: string; headers: Headers; body: Record<string, unknown> };
 
@@ -18,6 +18,13 @@ export function fakeModel(script: Step[]) {
     });
     const step = script.shift();
     if (!step) return new Response("script exhausted", { status: 500 });
+    if (step === "hang")
+      return new Promise<Response>((_, reject) => {
+        const signal = init?.signal ?? (input as Request).signal;
+        signal?.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError")),
+        );
+      });
     if (!Array.isArray(step))
       return new Response(step.body, {
         status: step.status,

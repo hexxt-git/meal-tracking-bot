@@ -1,12 +1,16 @@
 import { AgentResult, Change, runAgent, WeightChange } from "../agent/index.ts";
 import { config } from "../config.ts";
-import type { Meal } from "../db/index.ts";
+import { Meal, Superseded } from "../db/index.ts";
 import { sumTotals } from "../domain/meal.ts";
 import {
+  ActiveRun,
   ChatInput,
   isMeaningfulEdit,
   isOpen,
+  isStaleRun,
   Job,
+  jobInputs,
+  mergeJobs,
   newQuestionId,
   PendingQuestion,
 } from "../domain/question.ts";
@@ -16,7 +20,7 @@ import type { PhotoLibrary } from "../agent/tools.ts";
 import { base64, Media, ProviderError } from "../services/llm.ts";
 import { resolveProviders } from "./providers.ts";
 import { RESEARCH, RESEARCH_CUTOFF_SHARE } from "../domain/ai-settings.ts";
-import { esc, telegram } from "../telegram/api.ts";
+import { esc, fittedPhoto, telegram } from "../telegram/api.ts";
 import type { Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
 import { clock, dayLabel, kcalLeft, mealBody } from "./format.ts";
@@ -68,7 +72,7 @@ export async function respondToEdit(ctx: Ctx, msg: Message) {
   if (stored && !isMeaningfulEdit(stored.text, after)) return;
 
   const meals = await ctx.db.meals.touchedBy(stored?.batchIds ?? []);
-  const photoId = meals.length ? undefined : msg.photo?.at(-1)?.file_id;
+  const photoId = meals.length ? undefined : fittedPhoto(msg.photo);
   const input: ChatInput = {
     text: after,
     photoIds: photoId ? [photoId] : [],
@@ -141,7 +145,7 @@ async function collectInput(ctx: Ctx, msg: Message): Promise<ChatInput | null> {
   const imageDoc = msg.document?.mime_type?.startsWith("image/")
     ? msg.document
     : undefined;
-  const photoId = msg.photo?.at(-1)?.file_id ?? imageDoc?.file_id;
+  const photoId = fittedPhoto(msg.photo) ?? imageDoc?.file_id;
   const audio = msg.voice ?? msg.audio;
   const base: ChatInput = {
     text: msg.text ?? msg.caption ?? "",
@@ -176,32 +180,75 @@ async function collectInput(ctx: Ctx, msg: Message): Promise<ChatInput | null> {
 
 /** Only what the model can receive: no photos for a text-only model, no voice notes outside OpenRouter. */
 async function downloadMedia(
-  input: ChatInput,
+  inputs: ChatInput[],
   can: { images: boolean; audio: boolean },
 ): Promise<Media[]> {
   const images = await Promise.all(
-    (can.images ? input.photoIds : []).map(async (id) => ({
-      kind: "image" as const,
-      mime: input.imageMime,
-      data: await telegram.download(id),
-    })),
+    (can.images ? inputs : []).flatMap((input) =>
+      input.photoIds.map(async (id) => ({
+        kind: "image" as const,
+        mime: input.imageMime,
+        data: await telegram.download(id),
+      })),
+    ),
   );
-  if (!input.audio || !can.audio) return images;
-  return [
-    ...images,
-    {
-      kind: "audio",
-      format: audioFormat(input.audio.mime),
-      data: await telegram.download(input.audio.fileId),
-    },
-  ];
+  const audio = await Promise.all(
+    (can.audio ? inputs : []).flatMap(({ audio }) =>
+      audio
+        ? [
+            (async () => ({
+              kind: "audio" as const,
+              format: audioFormat(audio.mime),
+              data: await telegram.download(audio.fileId),
+            }))(),
+          ]
+        : [],
+    ),
+  );
+  return [...images, ...audio];
 }
 
-async function run(ctx: Ctx, job: Job) {
-  const { input } = job;
+/**
+ * Takes the user's run slot for `job`. A run still working on earlier messages is taken over: its changes are
+ * undone and its messages join this job. Runs that can't be merged (already replying, or an edit) are waited for.
+ */
+async function claimRun(ctx: Ctx, job: Job): Promise<ActiveRun> {
+  const id = crypto.randomUUID();
+  for (;;) {
+    let replaced: ActiveRun | null = null;
+    const claimed = await ctx.db.runs.claim((current) => {
+      const now = Date.now();
+      const fresh = (j: Job): ActiveRun => ({
+        id,
+        startedAt: new Date(now).toISOString(),
+        committedAt: null,
+        job: j,
+      });
+      replaced = null;
+      if (!current || isStaleRun(current, now, config.agent.runStaleMs))
+        return fresh(job);
+      const merged = !current.committedAt && mergeJobs(current.job, job);
+      if (!merged) return null;
+      replaced = current;
+      return fresh(merged);
+    });
+    if (claimed) {
+      const old = replaced as ActiveRun | null;
+      if (old) {
+        console.log(`[agent ${ctx.user.tgId}] took over run ${old.id}`);
+        await ctx.db.meals.undo(old.id);
+        await ctx.db.weights.undo(old.id);
+      }
+      return claimed;
+    }
+    await new Promise((r) => setTimeout(r, config.agent.runPollMs));
+  }
+}
+
+async function run(ctx: Ctx, requested: Job) {
   const providers = await resolveProviders(ctx);
   if (!providers) return ctx.send(welcomeView());
-  const { chat, settings } = providers;
+  const { settings } = providers;
   if (!(await ctx.db.limits.hit("ai", config.limits.analysesPerDay, "1 day"))) {
     return ctx.send(
       `You've reached the daily limit of ${config.limits.analysesPerDay} requests. It resets at midnight UTC.`,
@@ -215,10 +262,46 @@ async function run(ctx: Ctx, job: Job) {
         `Today's AI budget of ${usd(budget)} is used up (${usd(usage.costUsd)} spent). ` +
         "It resets at midnight UTC, and you can change it in Settings → Advanced.\n\nContinue anyway to lift it for the rest of today.",
       keyboard: [
-        [btn("Continue anyway", `budget:${await saveForRetry(ctx, job)}`)],
+        [
+          btn(
+            "Continue anyway",
+            `budget:${await saveForRetry(ctx, requested)}`,
+          ),
+        ],
       ],
     });
   }
+
+  const slot = await claimRun(ctx, requested);
+  const stop = new AbortController();
+  const watch = setInterval(async () => {
+    if (!(await ctx.db.runs.holds(slot.id).catch(() => true))) stop.abort();
+  }, config.agent.runPollMs);
+  try {
+    return await runClaimed(ctx, slot, stop, providers, usage.costUsd, budget);
+  } finally {
+    clearInterval(watch);
+    await ctx.db.runs.release(slot.id);
+  }
+}
+
+async function runClaimed(
+  ctx: Ctx,
+  { id: runId, job }: ActiveRun,
+  stop: AbortController,
+  providers: NonNullable<Awaited<ReturnType<typeof resolveProviders>>>,
+  spentUsd: number,
+  budget: number | null,
+) {
+  const { input } = job;
+  const inputs = jobInputs(job);
+  const { chat, settings } = providers;
+  const guarded = ctx.db.forRun(runId, () => stop.abort());
+  const superseded = () => {
+    if (!stop.signal.aborted) return false;
+    console.log(`[agent ${ctx.user.tgId}] run ${runId} was taken over`);
+    return true;
+  };
   if (ctx.user.pendingQuestion || ctx.user.fixMealId || ctx.user.retryRun) {
     ctx.user = await ctx.db.users.update({
       pendingQuestion: null,
@@ -232,6 +315,8 @@ async function run(ctx: Ctx, job: Job) {
     4500,
   );
   const recentWeights = await ctx.db.weights.recent(5);
+  const photoIds = inputs.flatMap((i) => i.photoIds);
+  const audios = inputs.filter((i) => i.audio).length;
   let result: AgentResult;
   try {
     await telegram.typing(ctx.user.chatId);
@@ -240,17 +325,15 @@ async function run(ctx: Ctx, job: Job) {
       audio: chat.kind === "openrouter",
     };
     const unsupported = [
-      ...(!can.images && input.photoIds.length
-        ? [
-            input.photoIds.length === 1
-              ? "a photo"
-              : `${input.photoIds.length} photos`,
-          ]
+      ...(!can.images && photoIds.length
+        ? [photoIds.length === 1 ? "a photo" : `${photoIds.length} photos`]
         : []),
-      ...(!can.audio && input.audio ? ["a voice note"] : []),
+      ...(!can.audio && audios
+        ? [audios === 1 ? "a voice note" : `${audios} voice notes`]
+        : []),
     ];
     const researchAllowed =
-      budget == null || usage.costUsd < budget * RESEARCH_CUTOFF_SHARE;
+      budget == null || spentUsd < budget * RESEARCH_CUTOFF_SHARE;
     result = await runAgent({
       provider: chat,
       research: researchAllowed ? providers.research : null,
@@ -259,13 +342,17 @@ async function run(ctx: Ctx, job: Job) {
       replyDetail: settings.replyDetail,
       unsupported,
       user: ctx.user,
-      store: ctx.db.meals,
-      weights: ctx.db.weights,
+      store: guarded.meals,
+      weights: guarded.weights,
       recentWeights,
       text: input.text,
-      media: await downloadMedia(input, can),
-      photoIds: input.photoIds,
-      photoRefs: await ctx.db.photos.register(input.photoIds),
+      earlier: (job.earlier ?? []).map((m) => ({
+        text: m.text,
+        sentAt: new Date(m.sentAt),
+      })),
+      media: await downloadMedia(inputs, can),
+      photoIds,
+      photoRefs: await ctx.db.photos.register(photoIds),
       library: can.images ? photoLibrary(ctx) : undefined,
       sentAt: new Date(input.sentAt),
       messageId: input.messageId,
@@ -277,11 +364,18 @@ async function run(ctx: Ctx, job: Job) {
       edit: job.edit
         ? await editContext(ctx, job.edit, input.messageId)
         : undefined,
-      history: await chatHistory(ctx, input.messageId),
+      history: await chatHistory(
+        ctx,
+        inputs.map((i) => i.messageId),
+      ),
       trace: (line) => console.log(`[agent ${ctx.user.tgId}] ${line}`),
+      batchId: runId,
+      signal: stop.signal,
     });
   } catch (e) {
+    if (superseded() || e instanceof Superseded) return;
     console.error(`[agent ${ctx.user.tgId}]`, e);
+    if (!(await ctx.db.runs.commit(runId))) return;
     return ctx.send({
       text: "Something went wrong on my side while handling that.",
       keyboard: retryKeyboard(await saveForRetry(ctx, job)),
@@ -290,8 +384,12 @@ async function run(ctx: Ctx, job: Job) {
     clearInterval(typing);
   }
   await ctx.db.usage.record(result.costUsd, result.searches);
+  // Past this point the run's changes stand: a newer message waits for the reply instead of undoing them.
+  if (superseded() || !(await ctx.db.runs.commit(runId))) return;
   const changed = result.changes.length + result.weightChanges.length > 0;
-  if (changed) await ctx.db.messages.addBatch(input.messageId, result.batchId);
+  if (changed)
+    for (const { messageId } of inputs)
+      await ctx.db.messages.addBatch(messageId, result.batchId);
   if (result.weightChanges.length)
     await syncProfileWeight(ctx, recentWeights.length === 0, result);
   const outcome = result.error
@@ -359,14 +457,9 @@ async function editContext(
 }
 
 /** Keeps the job so a Retry or Continue button can start it again; returns the id the button carries. */
-async function saveForRetry(
-  ctx: Ctx,
-  { input, answers, fixMealId, edit }: Job,
-) {
+async function saveForRetry(ctx: Ctx, job: Job) {
   const id = newQuestionId();
-  ctx.user = await ctx.db.users.update({
-    retryRun: { id, input, answers, fixMealId, edit },
-  });
+  ctx.user = await ctx.db.users.update({ retryRun: { ...job, id } });
   return id;
 }
 
@@ -401,10 +494,10 @@ function imageMime(b: Uint8Array) {
   return "image/jpeg";
 }
 
-async function chatHistory(ctx: Ctx, currentMessageId: number) {
+async function chatHistory(ctx: Ctx, currentMessageIds: number[]) {
   const rows = await ctx.db.messages.recent(
     config.agent.historyMessages,
-    currentMessageId,
+    currentMessageIds,
   );
   return rows.map((m) => ({
     role: m.role,

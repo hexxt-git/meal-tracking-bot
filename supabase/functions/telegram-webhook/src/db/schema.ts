@@ -17,7 +17,11 @@ import {
 import type { MealItem } from "../domain/meal.ts";
 import type { Step, Units } from "../domain/onboarding.ts";
 import type { AiSettings, AwaitingInput } from "../domain/ai-settings.ts";
-import type { PendingQuestion, SavedRun } from "../domain/question.ts";
+import type {
+  ActiveRun,
+  PendingQuestion,
+  SavedRun,
+} from "../domain/question.ts";
 import type { Activity, Objective, Sex } from "../domain/nutrition.ts";
 import type { WeightUnit } from "../domain/weight.ts";
 
@@ -57,6 +61,7 @@ export const users = app.table("users", {
   lastReminderAt: tstz("last_reminder_at"),
   pendingQuestion: jsonb("pending_question").$type<PendingQuestion>(),
   retryRun: jsonb("retry_run").$type<SavedRun>(),
+  agentRun: jsonb("agent_run").$type<ActiveRun>(),
   aiSettings: jsonb("ai_settings")
     .$type<Partial<AiSettings>>()
     .notNull()

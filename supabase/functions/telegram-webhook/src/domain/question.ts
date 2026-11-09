@@ -30,7 +30,53 @@ export type Job = {
   fixMealId: string | null;
   /** Set for an edited message; the meals that message touched are looked up when the job runs. */
   edit: { before: string | null; sentAt: string } | null;
+  /** Messages sent before `input` that got no reply yet, oldest first; handled together with it. */
+  earlier?: ChatInput[];
 };
+
+/** The assistant run in progress, kept on the user so a newer message can take it over. */
+export type ActiveRun = {
+  /** Also the undo batch id of everything the run changes. */
+  id: string;
+  startedAt: string;
+  /** Set once the run has finished its changes and is sending its reply; it can no longer be taken over. */
+  committedAt: string | null;
+  job: Job;
+};
+
+/** A run that started (or committed) this long ago died without clearing itself and is ignored. */
+export const isStaleRun = (r: ActiveRun, now: number, staleMs: number) =>
+  now - Date.parse(r.committedAt ?? r.startedAt) > staleMs;
+
+/**
+ * One job covering an unfinished run's messages and a newer one, or null when they can't be combined:
+ * an edit run has its own context, so it is left to finish, and so is the newer job when it edits a message
+ * the running job doesn't contain. Editing a message still in flight just replaces its text.
+ */
+export function mergeJobs(prev: Job, next: Job): Job | null {
+  if (prev.edit) return null;
+  const pending = [...(prev.earlier ?? []), prev.input];
+  if (next.edit) {
+    const i = pending.findIndex((m) => m.messageId === next.input.messageId);
+    if (i < 0) return null;
+    const edited = { ...pending[i], text: next.input.text };
+    return {
+      ...prev,
+      earlier: pending.slice(0, -1).map((m, j) => (j === i ? edited : m)),
+      input: i === pending.length - 1 ? edited : prev.input,
+    };
+  }
+  return {
+    input: next.input,
+    earlier: [...pending, ...(next.earlier ?? [])],
+    answers: [...prev.answers, ...next.answers],
+    fixMealId: next.fixMealId ?? prev.fixMealId,
+    edit: null,
+  };
+}
+
+/** Every message a job covers, oldest first. */
+export const jobInputs = (j: Job) => [...(j.earlier ?? []), j.input];
 
 /** A job that failed or was stopped by the daily budget, behind a Retry or Continue button with this id. */
 export type SavedRun = Job & { id: string };

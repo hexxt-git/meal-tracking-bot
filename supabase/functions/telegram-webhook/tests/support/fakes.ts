@@ -2,6 +2,8 @@ import type { Ctx } from "../../src/bot/context.ts";
 import type { View } from "../../src/bot/ui.ts";
 import type { Meal, User, UserDb, Weight } from "../../src/db/index.ts";
 import type { NewMeal, NewWeight, UserPatch } from "../../src/db/schema.ts";
+import { Superseded } from "../../src/db/index.ts";
+import type { ActiveRun } from "../../src/domain/question.ts";
 
 export const user = (patch: Partial<User> = {}): User => ({
   tgId: 1,
@@ -27,6 +29,7 @@ export const user = (patch: Partial<User> = {}): User => ({
   lastReminderAt: null,
   pendingQuestion: null,
   retryRun: null,
+  agentRun: null,
   aiSettings: {},
   awaitingInput: null,
   createdAt: new Date(0),
@@ -246,6 +249,58 @@ export function fakeDb(
     fileId: () => Promise.resolve(null),
   };
 
+  /** The run slot lives on `state.user.agentRun`, like the real column. */
+  const holds = (id: string) => state.user.agentRun?.id === id;
+  const runs = {
+    claim: (decide: (current: ActiveRun | null) => ActiveRun | null) => {
+      const next = decide(state.user.agentRun);
+      if (next) state.user = { ...state.user, agentRun: next };
+      return Promise.resolve(next);
+    },
+    holds: (id: string) => Promise.resolve(holds(id)),
+    commit: (id: string) => {
+      if (!holds(id)) return Promise.resolve(false);
+      state.user = {
+        ...state.user,
+        agentRun: {
+          ...state.user.agentRun!,
+          committedAt: new Date().toISOString(),
+        },
+      };
+      return Promise.resolve(true);
+    },
+    release: (id: string) => {
+      if (holds(id)) state.user = { ...state.user, agentRun: null };
+      return Promise.resolve();
+    },
+  };
+  const guard =
+    <A extends unknown[], R>(
+      id: string,
+      onSuperseded: () => void,
+      fn: (...a: A) => Promise<R>,
+    ) =>
+    (...a: A) => {
+      if (holds(id)) return fn(...a);
+      onSuperseded();
+      return Promise.reject(new Superseded());
+    };
+  const guardAll = <T extends Record<string, unknown>>(
+    repo: T,
+    id: string,
+    onSuperseded: () => void,
+  ) =>
+    Object.fromEntries(
+      Object.entries(repo).map(([k, fn]) => [
+        k,
+        guard(id, onSuperseded, fn as (...a: unknown[]) => Promise<unknown>),
+      ]),
+    ) as T;
+  const forRun = (id: string, onSuperseded: () => void) => ({
+    meals: guardAll(meals, id, onSuperseded),
+    weights: guardAll(weights, id, onSuperseded),
+  });
+
   const unused = (name: string) =>
     new Proxy(
       {},
@@ -266,6 +321,8 @@ export function fakeDb(
     usage,
     messages,
     photos,
+    runs,
+    forRun,
   } as unknown as UserDb;
 
   return { db, state };

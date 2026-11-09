@@ -1,5 +1,11 @@
 import { assertEquals } from "@std/assert";
 import {
+  ChatInput,
+  Job,
+  jobInputs,
+  mergeJobs,
+} from "../src/domain/question.ts";
+import {
   aiSettings,
   DEFAULT_SETTINGS,
   parseBaseUrl,
@@ -232,4 +238,59 @@ Deno.test("stored AI settings fill in defaults", () => {
   assertEquals(s.custom.enabled, true);
   assertEquals(s.custom.auth, "bearer");
   assertEquals(aiSettings(null), DEFAULT_SETTINGS);
+});
+
+const chatInput = (messageId: number, text: string): ChatInput => ({
+  text,
+  photoIds: [],
+  imageMime: "image/jpeg",
+  audio: null,
+  sentAt: new Date(0).toISOString(),
+  messageId,
+});
+const job = (input: ChatInput, patch: Partial<Job> = {}): Job => ({
+  input,
+  answers: [],
+  fixMealId: null,
+  edit: null,
+  ...patch,
+});
+
+Deno.test("a newer message joins the unfinished run's messages", () => {
+  const merged = mergeJobs(
+    job(chatInput(1, "chicken"), { fixMealId: "m1" }),
+    job(chatInput(2, "rice")),
+  );
+  assertEquals(merged && jobInputs(merged).map((m) => m.text), [
+    "chicken",
+    "rice",
+  ]);
+  assertEquals(merged?.fixMealId, "m1");
+});
+
+Deno.test("editing a message still in flight replaces its text", () => {
+  const prev = job(chatInput(2, "rice"), { earlier: [chatInput(1, "chiken")] });
+  const merged = mergeJobs(
+    prev,
+    job(chatInput(1, "chicken"), {
+      edit: { before: "chiken", sentAt: new Date(0).toISOString() },
+    }),
+  );
+  assertEquals(merged && jobInputs(merged).map((m) => m.text), [
+    "chicken",
+    "rice",
+  ]);
+  assertEquals(merged?.edit, null);
+});
+
+Deno.test("edit runs and edits of other messages aren't merged", () => {
+  const edit = { before: "x", sentAt: new Date(0).toISOString() };
+  assertEquals(
+    mergeJobs(job(chatInput(1, "a"), { edit }), job(chatInput(2, "b"))),
+    null,
+  );
+  assertEquals(
+    mergeJobs(job(chatInput(2, "b")), job(chatInput(1, "a"), { edit })),
+    null,
+  );
 });
