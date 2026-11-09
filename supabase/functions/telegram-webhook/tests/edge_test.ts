@@ -471,7 +471,8 @@ Deno.test(
 
 Deno.test("reminder text for unknown hours", () => {
   assertEquals(reminderText(7), "No meal logged in 7 hours.");
-  assert(reminderText(48).includes("last reminder"));
+  assert(reminderText(72).includes("last reminder"));
+  assert(!reminderText(48).includes("last reminder"));
 });
 
 Deno.test(

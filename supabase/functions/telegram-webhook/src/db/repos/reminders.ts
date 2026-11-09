@@ -10,9 +10,11 @@ export function remindersRepo(run: Run) {
     /**
      * Picks users whose latest meal (or signup, if none) is at least one threshold old and who haven't had that
      * threshold's reminder yet, and marks them as reminded. Only the highest due threshold is returned per user.
+     * A threshold that passed over 12 h ago is never sent late (e.g. after downtime or for long-inactive users).
+     * Thresholds in `quiet.hours` are left out while the user's local time is before `quiet.until` o'clock.
      * The `last_reminder_at is not distinct from` check makes a concurrent run skip rows this one already claimed.
      */
-    claimDue: (hours: number[]) =>
+    claimDue: (hours: number[], quiet: { hours: number[]; until: number }) =>
       run(async (tx) => {
         const rows = await tx.execute<{
           tg_id: string;
@@ -22,7 +24,10 @@ export function remindersRepo(run: Run) {
           with due as (
             select u.tg_id, u.last_reminder_at, l.last_meal_at,
               (select max(h) from unnest(${`{${hours.join(",")}}`}::int[]) h
-                where l.last_meal_at + make_interval(hours => h) <= now()) as hours
+                where l.last_meal_at + make_interval(hours => h) <= now()
+                  and l.last_meal_at + make_interval(hours => h) > now() - interval '12 hours'
+                  and not (h = any(${`{${quiet.hours.join(",")}}`}::int[])
+                    and extract(hour from now() + make_interval(mins => u.utc_offset_minutes)) < ${quiet.until})) as hours
             from app.users u
             cross join lateral (
               select coalesce(max(m.logged_at), u.created_at) as last_meal_at from app.meals m where m.tg_id = u.tg_id

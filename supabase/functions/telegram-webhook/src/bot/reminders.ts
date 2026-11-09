@@ -1,11 +1,15 @@
 import { systemDb } from "../db/index.ts";
-import { REMINDER_HOURS, reminderText } from "../domain/reminders.ts";
+import {
+  NIGHT_QUIET,
+  REMINDER_HOURS,
+  reminderText,
+} from "../domain/reminders.ts";
 import { telegram } from "../telegram/api.ts";
 
 /** Sends every reminder that is due. Triggered by the `reminders` pg_cron job every 15 minutes. */
 export async function sendReminders(): Promise<number> {
   const db = systemDb();
-  const due = await db.reminders.claimDue(REMINDER_HOURS);
+  const due = await db.reminders.claimDue(REMINDER_HOURS, NIGHT_QUIET);
   let sent = 0;
   for (const r of due) {
     try {
