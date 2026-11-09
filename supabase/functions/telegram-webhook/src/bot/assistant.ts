@@ -1,4 +1,10 @@
-import { AgentResult, Change, runAgent, WeightChange } from "../agent/index.ts";
+import {
+  AgentResult,
+  Change,
+  NoteChange,
+  runAgent,
+  WeightChange,
+} from "../agent/index.ts";
 import { config } from "../config.ts";
 import { Meal, Superseded } from "../db/index.ts";
 import { sumTotals } from "../domain/meal.ts";
@@ -352,6 +358,7 @@ async function runClaimed(
       user: ctx.user,
       store: guarded.meals,
       weights: guarded.weights,
+      notes: guarded.notes,
       recentWeights,
       text: input.text,
       earlier: (job.earlier ?? []).map((m) => ({
@@ -394,7 +401,11 @@ async function runClaimed(
   await ctx.db.usage.record(result.costUsd, result.searches);
   // Past this point the run's changes stand: a newer message waits for the reply instead of undoing them.
   if (superseded() || !(await ctx.db.runs.commit(runId))) return;
-  const changed = result.changes.length + result.weightChanges.length > 0;
+  const changed =
+    result.changes.length +
+      result.weightChanges.length +
+      result.noteChanges.length >
+    0;
   if (changed)
     for (const { messageId } of inputs)
       await ctx.db.messages.addBatch(messageId, result.batchId);
@@ -533,11 +544,14 @@ export function replySummary(r: AgentResult): string {
       ? `${verb} "${c.meal.description}".`
       : `${verb} "${c.meal.description}" (${c.meal.kcal} kcal).`;
   });
-  lines.push(...weights);
+  lines.push(...weights, ...r.noteChanges.map(noteLine));
   if (r.error) lines.push(`(OpenRouter error: ${r.error.message})`);
   else if (r.reply) lines.push(r.reply);
   return lines.join(" ");
 }
+
+const noteLine = (c: NoteChange) =>
+  `${c.kind === "created" ? "Remembered" : c.kind === "updated" ? "Updated memory" : "Forgot"}: ${c.text}`;
 
 async function rememberReply(ctx: Ctx, sent: unknown, summary: string) {
   const id = (sent as { message_id?: number } | null)?.message_id;
@@ -580,7 +594,13 @@ export async function resultView(
     return `${kind === "created" ? "Weight logged" : "Weight updated"}: <b>${value(w.weightKg, w.unit)}</b>  ·  ${at}${was}`;
   };
 
-  const parts = [...r.changes.map(card), ...r.weightChanges.map(weightCard)];
+  const parts = [
+    ...r.changes.map(card),
+    ...r.weightChanges.map(weightCard),
+    ...(r.noteChanges.length
+      ? [r.noteChanges.map((c) => `<i>${esc(noteLine(c))}</i>`).join("\n")]
+      : []),
+  ];
   if (r.error)
     parts.push(
       custom ? customProviderMessage(r.error) : openRouterMessage(r.error),

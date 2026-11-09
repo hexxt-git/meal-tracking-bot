@@ -175,6 +175,16 @@ export const bodyWeights = app.table("body_weights", {
   createdAt: tstz("created_at").notNull().defaultNow(),
 });
 
+export const userNotes = app.table("user_notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tgId: tgId(),
+  text: text("text").notNull(),
+  createdAt: tstz("created_at").notNull().defaultNow(),
+  updatedAt: tstz("updated_at").notNull().defaultNow(),
+});
+
+export type Note = typeof userNotes.$inferSelect;
+
 export type Weight = typeof bodyWeights.$inferSelect;
 export type NewWeight = Omit<
   typeof bodyWeights.$inferInsert,

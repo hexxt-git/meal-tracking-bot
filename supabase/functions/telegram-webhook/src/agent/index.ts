@@ -26,9 +26,12 @@ import {
   RunState,
   WeightChange,
   WeightStore,
+  NoteChange,
+  NoteStore,
+  noteView,
 } from "./tools.ts";
 
-export type { Change, WeightChange } from "./tools.ts";
+export type { Change, NoteChange, WeightChange } from "./tools.ts";
 
 export type AgentUser = {
   utcOffsetMinutes: number;
@@ -54,6 +57,8 @@ export type AgentInput = {
   user: AgentUser;
   store: MealStore;
   weights: WeightStore;
+  /** The user's saved notes; without it the assistant has no memory tools. */
+  notes?: NoteStore;
   /** Latest weigh-ins, newest first. */
   recentWeights: Weight[];
   text: string;
@@ -93,6 +98,7 @@ export type AgentResult = {
   reply: string;
   changes: Change[];
   weightChanges: WeightChange[];
+  noteChanges: NoteChange[];
   batchId: string;
   question: { question: string; options: string[] } | null;
   error: ProviderError | null;
@@ -137,6 +143,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     batchId: input.batchId,
     store: input.store,
     weights: input.weights,
+    notes: input.notes,
     offsetMin: off,
     sentAt: input.sentAt,
     userText:
@@ -162,6 +169,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
       ? `${u.targetKcal} kcal, protein ${u.targetProteinG} g, carbs ${u.targetCarbsG} g, fat ${u.targetFatG} g`
       : null,
     goal: goalText(u),
+    notes: input.notes ? (await input.notes.list()).map(noteView) : null,
     recentMeals: await run.views(input.recentMeals),
     fixMeal: input.fixMeal && (await run.view(input.fixMeal)),
     recentWeights: input.recentWeights.map((w) => run.weightView(w)),
@@ -291,6 +299,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     reply,
     changes: [...run.changes.values()],
     weightChanges: [...run.weightChanges.values()],
+    noteChanges: run.noteChanges,
     batchId: run.batchId,
     question: run.question,
     error: errorMessage && !timedOut ? parseProviderError(errorMessage) : null,

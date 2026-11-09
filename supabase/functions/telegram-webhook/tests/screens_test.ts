@@ -17,6 +17,7 @@ import {
 } from "../src/bot/screens/journal.ts";
 import { onboardingAction, stepView } from "../src/bot/screens/onboarding.ts";
 import { tzPicker } from "../src/bot/screens/timezone.ts";
+import { deleteNote, memoryView } from "../src/bot/screens/memory.ts";
 import { bar, rows, table, truncate } from "../src/bot/ui.ts";
 import {
   COUNTRIES,
@@ -331,4 +332,19 @@ Deno.test("menu has every main screen", () => {
     "imp",
   ])
     assert(data.includes(d), d);
+});
+
+Deno.test("memory lists notes ten per page and deletes one", async () => {
+  const { ctx, state } = fakeCtx();
+  assertStringIncludes((await memoryView(ctx)).text, "Nothing saved yet");
+  for (let i = 1; i <= 12; i++) await ctx.db.notes.create(`note ${i}`);
+  const first = await memoryView(ctx, 0);
+  assertStringIncludes(first.text, "10. note 10");
+  assert(!first.text.includes("11. note 11"));
+  assert(buttons(first).flat().includes("mem:1"));
+  const second = await memoryView(ctx, 1);
+  assertStringIncludes(second.text, "11. note 11");
+  const r = await deleteNote(ctx, state.notes[0].id, 0);
+  assertEquals(r.toast, "Forgotten");
+  assertEquals(state.notes.length, 11);
 });

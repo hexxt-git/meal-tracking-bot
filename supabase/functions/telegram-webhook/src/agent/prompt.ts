@@ -12,6 +12,8 @@ export type PromptContext = {
   targets: string | null;
   /** e.g. "gain weight 0.25 kg/week". */
   goal?: string | null;
+  /** The user's saved notes; null when memory isn't available. */
+  notes?: { id: string; text: string }[] | null;
   /** Meals logged in the last day, as the read tools return them. */
   recentMeals: unknown[];
   fixMeal: unknown | null;
@@ -111,6 +113,7 @@ CONTEXT
 
 HOW TO WORK
 - Decide what the message is: new food (log_meal, one call per meal), a correction of a meal logged in the last ${EDIT_WINDOW_HOURS} h (update_meal with the complete new item list, or only eaten_at for a time change; delete_meal if it wasn't eaten or is a duplicate), a question about their log (read_meals covers ${READ_WINDOW_DAYS} days), or general conversation.
+- "Had X" describes a new meal even when it resembles an earlier one ("another tea, no sugar this time" is a second tea). Treat it as a correction only when the user says an earlier entry was wrong or refers to it ("that tea had no sugar").
 - Body weight: a number with kg or lb ("70kg", "154.3 lbs"), or a photo of a bathroom scale, is a weigh-in: log_weight with the unit given or shown on the display. Read the scale's display digits carefully. If the number or unit is unclear (blurry, no unit shown and the value fits both), ask instead of guessing. Corrections or "delete that weigh-in" go to update_weight or delete_weight; questions about weight trends use the weigh-ins below or read_weights. Don't confuse a scale with food, or food weight on a kitchen scale with body weight.
 - General questions about food, nutrition, cooking, ingredients or healthy habits: answer from your own knowledge, directly and accurately, without tools other than reply. Don't log anything unless the user says they ate it.
 - The message often continues the RECENT CONVERSATION below: "why?", "what about brown rice?", "and yesterday?", "make it 2" refer to what was just said. Resolve them from the conversation and answer or act on that, without asking what they mean when it's clear.
@@ -143,7 +146,19 @@ ${c.history.length ? transcript(c.history) : "(none)"}
 
 MEALS LOGGED IN THE LAST ${EDIT_WINDOW_HOURS} H (most recent first): ${JSON.stringify(c.recentMeals)}
 
-LATEST WEIGH-INS (most recent first): ${c.recentWeights.length ? JSON.stringify(c.recentWeights) : "(none)"}${
+${
+  c.notes
+    ? `MEMORY: notes you saved about this user, oldest first. They are facts the user gave you; prefer them over research and generic values:
+${c.notes.length ? c.notes.map((n) => `- [${n.id}] ${n.text}`).join("\n") : "(none)"}
+- save_note when the user tells you something that will matter again: their own products with exact nutrition or serving size (e.g. "Mass gainer (user's own): per 100 g, 40 g protein and 5 g creatine"), usual portions or recipes, foods they never eat, how they want things logged. Also when they say "remember". Self-contained, specific, one fact per note.
+- Don't generalize from one serving: the user buys the same dish (chapati, pizza, crousty) from different places, so never save what one serving was as a rule for that dish. A note about restaurant or street food must name the place and only applies there; without a named place, don't save it and keep estimating each meal from its photo and description. Use a place's note only when the user names that place or clearly says it's the same place; "again" or "another one" alone doesn't say where. If notes for different places would change the total a lot, ask which place.
+- A note doesn't fix the log: when the fact corrects a meal already logged (e.g. "that's wrong, my gainer has…"), also update_meal on that meal in the same turn.
+- When a note turns out wrong or outdated, update_note or delete_note it; never keep two notes that disagree. Don't save one-off meals, guesses, or anything already in their settings.
+- Mention a new note in your reply in a few words.
+
+`
+    : ""
+}LATEST WEIGH-INS (most recent first): ${c.recentWeights.length ? JSON.stringify(c.recentWeights) : "(none)"}${
     c.fixMeal
       ? `\n\nThe user tapped "Fix" on this meal, so the message is probably about it: ${JSON.stringify(c.fixMeal)}`
       : ""

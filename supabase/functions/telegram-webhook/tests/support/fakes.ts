@@ -1,6 +1,6 @@
 import type { Ctx } from "../../src/bot/context.ts";
 import type { View } from "../../src/bot/ui.ts";
-import type { Meal, User, UserDb, Weight } from "../../src/db/index.ts";
+import type { Meal, Note, User, UserDb, Weight } from "../../src/db/index.ts";
 import type { NewMeal, NewWeight, UserPatch } from "../../src/db/schema.ts";
 import { Superseded } from "../../src/db/index.ts";
 import type { ActiveRun } from "../../src/domain/question.ts";
@@ -88,6 +88,7 @@ export function fakeDb(
     user: init.user ?? user(),
     meals: [...(init.meals ?? [])],
     weights: [...(init.weights ?? [])],
+    notes: [] as Note[],
     batches: new Map<string, string[]>(),
     updates: [] as UserPatch[],
     withinLimits: true,
@@ -301,9 +302,36 @@ export function fakeDb(
         guard(id, onSuperseded, fn as (...a: unknown[]) => Promise<unknown>),
       ]),
     ) as T;
+  const notes = {
+    list: () => Promise.resolve([...state.notes]),
+    byId: (id: string) =>
+      Promise.resolve(state.notes.find((n) => n.id === id) ?? null),
+    create: (text: string) => {
+      const now = new Date();
+      const n: Note = {
+        id: crypto.randomUUID(),
+        tgId: state.user.tgId,
+        text,
+        createdAt: now,
+        updatedAt: now,
+      };
+      state.notes.push(n);
+      return Promise.resolve(n);
+    },
+    update: (id: string, text: string) => {
+      const n = state.notes.find((x) => x.id === id);
+      if (n) n.text = text;
+      return Promise.resolve(n ?? null);
+    },
+    delete: (id: string) => {
+      const i = state.notes.findIndex((x) => x.id === id);
+      return Promise.resolve(i < 0 ? null : state.notes.splice(i, 1)[0]);
+    },
+  };
   const forRun = (id: string, onSuperseded: () => void) => ({
     meals: guardAll(meals, id, onSuperseded),
     weights: guardAll(weights, id, onSuperseded),
+    notes: guardAll(notes, id, onSuperseded),
   });
 
   const unused = (name: string) =>
@@ -319,6 +347,7 @@ export function fakeDb(
   const db = {
     meals,
     weights,
+    notes,
     users,
     keys,
     limits,

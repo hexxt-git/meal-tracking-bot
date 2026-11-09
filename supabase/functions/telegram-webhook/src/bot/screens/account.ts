@@ -111,7 +111,7 @@ export async function settingsView(ctx: Ctx): Promise<View> {
         btn(hasKey ? "Replace API key" : "Add API key", "key:new"),
         ...(hasKey ? [btn("Remove API key", "key:rm")] : []),
       ],
-      [btn("Advanced", "adv")],
+      [btn("Memory", "mem:0"), btn("Advanced", "adv")],
       [btn("Delete account", "acct")],
       [btn("‹ Menu", "menu")],
     ],

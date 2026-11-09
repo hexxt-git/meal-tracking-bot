@@ -5,7 +5,12 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { mealTools, RunOptions, RunState } from "../src/agent/tools.ts";
+import {
+  MAX_NOTES,
+  mealTools,
+  RunOptions,
+  RunState,
+} from "../src/agent/tools.ts";
 import { fakeDb, meal } from "./support/fakes.ts";
 
 const HOUR = 3_600_000;
@@ -313,4 +318,42 @@ Deno.test("research without sources comes back with a warning", async () => {
   assertStringIncludes((await result("a")).warning, "No web sources");
   sources = ["https://example.com"];
   assertEquals((await result("b")).warning, undefined);
+});
+
+Deno.test("note tools save, update, delete and cap notes", async () => {
+  const { db, state } = fakeDb();
+  const run = new RunState({
+    store: db.meals,
+    weights: db.weights,
+    notes: db.notes,
+    offsetMin: 0,
+    sentAt: new Date(),
+    userText: null,
+    fileIds: [],
+    messageId: 1,
+  });
+  const tools = new Map(mealTools(run, false).map((t) => [t.name, t]));
+  const call = (name: string, args: unknown) =>
+    tools.get(name)!.execute("c", args as never);
+
+  await call("save_note", { text: "  Gainer:   40 g protein " });
+  assertEquals(state.notes[0].text, "Gainer: 40 g protein");
+  const id = state.notes[0].id;
+  await call("update_note", { note_id: id, text: "Gainer: 42 g protein" });
+  assertEquals(state.notes[0].text, "Gainer: 42 g protein");
+  await assertRejects(() => call("update_note", { note_id: "x", text: "y" }));
+  await call("delete_note", { note_id: id });
+  assertEquals(state.notes.length, 0);
+  assertEquals(
+    run.noteChanges.map((c) => c.kind),
+    ["created", "updated", "deleted"],
+  );
+
+  for (let i = 0; i < MAX_NOTES; i++)
+    await call("save_note", { text: `n${i}` });
+  await assertRejects(
+    () => call("save_note", { text: "one more" }),
+    Error,
+    "memory is full",
+  );
 });

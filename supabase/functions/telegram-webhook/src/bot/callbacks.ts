@@ -36,6 +36,7 @@ import {
   stepView,
 } from "./screens/onboarding.ts";
 import { deleteWeight, weightEntryView, weightView } from "./screens/weight.ts";
+import { deleteNote, memoryView, noteView } from "./screens/memory.ts";
 import type { Reply } from "./ui.ts";
 
 type Handler = (
@@ -80,6 +81,11 @@ const HANDLERS: Record<string, Handler> = {
   ob: onboardingAction,
 
   set: async (ctx) => ({ view: await settingsView(ctx) }),
+  mem: async (ctx, [page]) => ({ view: await memoryView(ctx, int(page)) }),
+  memv: async (ctx, [id, page]) => ({
+    view: await noteView(ctx, id, int(page)),
+  }),
+  memd: (ctx, [id, page]) => deleteNote(ctx, id, int(page)),
   units: setUnits,
   rem: setReminders,
   adv: advancedAction,

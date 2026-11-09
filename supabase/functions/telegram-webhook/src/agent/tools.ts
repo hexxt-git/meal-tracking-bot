@@ -1,7 +1,7 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { TSchema, Type } from "typebox";
-import type { Meal, UserDb, Weight } from "../db/index.ts";
+import type { Meal, Note, UserDb, Weight } from "../db/index.ts";
 import {
   isEditable,
   itemTotals,
@@ -27,6 +27,20 @@ export type WeightStore = Pick<
   UserDb["weights"],
   "byId" | "recent" | "create" | "update" | "delete"
 >;
+
+export type NoteStore = Pick<
+  UserDb["notes"],
+  "byId" | "list" | "create" | "update" | "delete"
+>;
+
+export type NoteChange = {
+  kind: "created" | "updated" | "deleted";
+  text: string;
+};
+
+/** Notes kept per user; past this, the assistant must merge or delete before saving more. */
+export const MAX_NOTES = 40;
+export const MAX_NOTE_CHARS = 300;
 
 export type WeightChange = {
   kind: "created" | "updated" | "deleted";
@@ -56,6 +70,8 @@ export type RunOptions = {
   batchId?: string;
   store: MealStore;
   weights: WeightStore;
+  /** Absent in contexts without memory; the note tools are then left out. */
+  notes?: NoteStore;
   offsetMin: number;
   sentAt: Date;
   userText: string | null;
@@ -78,6 +94,7 @@ export class RunState {
   readonly batchId: string;
   readonly changes = new Map<string, Change>();
   readonly weightChanges = new Map<string, WeightChange>();
+  readonly noteChanges: NoteChange[] = [];
   question: { question: string; options: string[] } | null = null;
   replyText: string | null = null;
   researches = 0;
@@ -300,6 +317,72 @@ function weightTools(run: RunState): AgentTool[] {
   ];
 }
 
+function noteTools(run: RunState, notes: NoteStore): AgentTool[] {
+  const NoteText = Type.String({ minLength: 1, maxLength: MAX_NOTE_CHARS });
+  const clean = (s: string) => {
+    const t = s.trim().replace(/\s+/g, " ");
+    if (!t) throw new Error("A note needs some text");
+    if (t.length > MAX_NOTE_CHARS)
+      throw new Error(`Notes are at most ${MAX_NOTE_CHARS} characters`);
+    return t;
+  };
+  const existing = async (id: string) => {
+    const n = UUID.test(id) ? await notes.byId(id) : null;
+    if (!n) throw new Error(`No note with id ${id}`);
+    return n;
+  };
+  return [
+    tool({
+      name: "save_note",
+      label: "Save note",
+      description:
+        "Remembers a lasting fact about the user for all future messages, e.g. their own product's nutrition, a usual portion or a preference. Not for one-off meals.",
+      parameters: Type.Object({ text: NoteText }),
+      execute: async (_id, p) => {
+        const text = clean(p.text);
+        if ((await notes.list()).length >= MAX_NOTES)
+          throw new Error(
+            `The user already has ${MAX_NOTES} notes. Make room by merging duplicates or deleting outdated ones (never overwrite an unrelated note); if none can go, tell the user their memory is full`,
+          );
+        const n = await notes.create(text);
+        run.noteChanges.push({ kind: "created", text });
+        return ok({ id: n.id, text });
+      },
+    }),
+    tool({
+      name: "update_note",
+      label: "Update note",
+      description:
+        "Replaces a note's text, e.g. when the user corrects a remembered fact. Write the complete new text.",
+      parameters: Type.Object({ note_id: Type.String(), text: NoteText }),
+      execute: async (_id, p) => {
+        const before = await existing(p.note_id.trim());
+        const text = clean(p.text);
+        const n = await notes.update(before.id, text);
+        if (!n) throw new Error(`No note with id ${p.note_id}`);
+        run.noteChanges.push({ kind: "updated", text });
+        return ok({ id: n.id, text });
+      },
+    }),
+    tool({
+      name: "delete_note",
+      label: "Delete note",
+      description:
+        "Forgets a note that is wrong or no longer true, or that the user asks you to forget.",
+      parameters: Type.Object({ note_id: Type.String() }),
+      execute: async (_id, p) => {
+        const n = await existing(p.note_id.trim());
+        await notes.delete(n.id);
+        run.noteChanges.push({ kind: "deleted", text: n.text });
+        return ok({ deleted: n.id });
+      },
+    }),
+  ];
+}
+
+/** As the assistant sees notes in its prompt. */
+export const noteView = (n: Note) => ({ id: n.id, text: n.text });
+
 async function editableMeal(run: RunState, id: string): Promise<Meal> {
   const meal = UUID.test(id) ? await run.o.store.byId(id) : null;
   if (!meal) throw new Error(`No meal with id ${id}`);
@@ -437,6 +520,7 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
       },
     }),
     ...weightTools(run),
+    ...(run.o.notes ? noteTools(run, run.o.notes) : []),
   ];
   if (run.o.photos?.length || run.o.library) {
     const maxViews = run.o.maxImageViews ?? 3;

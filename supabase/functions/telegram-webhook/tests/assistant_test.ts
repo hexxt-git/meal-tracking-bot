@@ -281,3 +281,31 @@ Deno.test("a tapped answer is added to the stored question", async () => {
   await reply.after?.();
   assertStringIncludes(asked.text, "-> User answered: lb");
 });
+
+Deno.test(
+  "a saved note is shown on the card and given to later runs",
+  async () => {
+    const seen = fakeModel([
+      [
+        {
+          name: "save_note",
+          args: {
+            text: "Mass gainer: per 100 g, 40 g protein and 5 g creatine",
+          },
+        },
+        { name: "reply", args: { text: "Noted." } },
+      ],
+      [{ name: "reply", args: { text: "Hi." } }],
+    ]);
+    const { ctx, state, sent } = setup();
+    await respond(ctx, message("remember my gainer has 40g protein"));
+    assertEquals(
+      state.notes.map((n) => n.text),
+      ["Mass gainer: per 100 g, 40 g protein and 5 g creatine"],
+    );
+    assertStringIncludes(texts(sent).at(-1)!, "Remembered: Mass gainer");
+    await respond(ctx, message("hi"));
+    const system = JSON.stringify(seen[1].body.messages);
+    assertStringIncludes(system, `[${state.notes[0].id}] Mass gainer`);
+  },
+);

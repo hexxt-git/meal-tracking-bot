@@ -26,6 +26,7 @@ const result = (patch: Partial<AgentResult> = {}): AgentResult => ({
   reply: "",
   changes: [],
   weightChanges: [],
+  noteChanges: [],
   batchId: "b1",
   question: null,
   error: null,
