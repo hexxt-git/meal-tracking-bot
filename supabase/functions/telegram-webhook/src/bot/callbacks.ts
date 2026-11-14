@@ -137,6 +137,6 @@ export async function runCallback(ctx: Ctx, cb: CallbackQuery) {
       reply.view.keyboard,
     );
   if (reply.send) await ctx.send(reply.send);
-  await telegram.answerCallback(cb.id, reply.toast);
+  await telegram.answerCallback(cb.id, reply.toast).catch(() => {});
   await reply.after?.();
 }
