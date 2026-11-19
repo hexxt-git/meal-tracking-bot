@@ -1,9 +1,11 @@
 import { systemRunner, userRunner } from "./client.ts";
 export { ping } from "./client.ts";
+import { agentRunsRepo } from "./repos/agent-runs.ts";
 import { albumsRepo } from "./repos/albums.ts";
 import { keysRepo } from "./repos/keys.ts";
 import { limitsRepo } from "./repos/limits.ts";
 import { mealsRepo } from "./repos/meals.ts";
+import { mediaWaitsRepo } from "./repos/media-waits.ts";
 import { messagesRepo } from "./repos/messages.ts";
 import { notesRepo } from "./repos/notes.ts";
 import { photosRepo } from "./repos/photos.ts";
@@ -31,6 +33,7 @@ export function userDb(tgId: number) {
     weights: weightsRepo(run),
     notes: notesRepo(run),
     runs: runsRepo(run, tgId),
+    agentRuns: agentRunsRepo(run),
     /** Meal, weight and note access for an assistant run that fails once `runId` no longer holds the run slot. */
     forRun: (runId: string, onSuperseded: () => void) => {
       const guarded = guardedRunner(run, tgId, runId, onSuperseded);
@@ -47,5 +50,8 @@ export type UserDb = ReturnType<typeof userDb>;
 
 /** Data access for scheduled jobs that span users. Bypasses RLS, so it exposes only what those jobs need. */
 export function systemDb() {
-  return { reminders: remindersRepo(systemRunner) };
+  return {
+    reminders: remindersRepo(systemRunner),
+    mediaWaits: mediaWaitsRepo(systemRunner),
+  };
 }

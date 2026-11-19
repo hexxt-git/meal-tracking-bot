@@ -32,7 +32,12 @@ export type Job = {
   edit: { before: string | null; sentAt: string } | null;
   /** Messages sent before `input` that got no reply yet, oldest first; handled together with it. */
   earlier?: ChatInput[];
+  /** Set when retrying a request whose media Telegram wouldn't deliver: keep retrying until then, silently. */
+  mediaUntil?: string;
 };
+
+/** A request held until Telegram delivers its media; `id` makes taking it for a retry race-free. */
+export type MediaWait = { id: string; job: Job; until: string };
 
 /** The assistant run in progress, kept on the user so a newer message can take it over. */
 export type ActiveRun = {

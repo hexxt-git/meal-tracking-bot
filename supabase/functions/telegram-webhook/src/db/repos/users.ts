@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Run } from "../client.ts";
 import { processedUpdates, User, UserPatch, users } from "../schema.ts";
 
@@ -52,6 +52,33 @@ export function usersRepo(run: Run, tgId: number) {
         return user;
       });
     },
+
+    get: () =>
+      run(async (tx) => {
+        const [user] = await tx
+          .select()
+          .from(users)
+          .where(eq(users.tgId, tgId));
+        return user ?? null;
+      }),
+
+    /** Clears the media wait if it is still `id`; false when another retry or a newer message already took it. */
+    takeMediaWait: (id: string) =>
+      run(
+        async (tx) =>
+          (
+            await tx
+              .update(users)
+              .set({ mediaWait: null })
+              .where(
+                and(
+                  eq(users.tgId, tgId),
+                  sql`${users.mediaWait}->>'id' = ${id}`,
+                ),
+              )
+              .returning({ tgId: users.tgId })
+          ).length > 0,
+      ),
 
     /** Removes the profile, meals, Vault key and bookkeeping rows. */
     deleteAccount(): Promise<void> {

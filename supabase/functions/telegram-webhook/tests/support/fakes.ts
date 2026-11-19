@@ -30,6 +30,7 @@ export const user = (patch: Partial<User> = {}): User => ({
   pendingQuestion: null,
   retryRun: null,
   agentRun: null,
+  mediaWait: null,
   aiSettings: {},
   awaitingInput: null,
   createdAt: new Date(0),
@@ -210,6 +211,12 @@ export function fakeDb(
   };
 
   const users = {
+    get: () => Promise.resolve(state.user),
+    takeMediaWait: (id: string) => {
+      if (state.user.mediaWait?.id !== id) return Promise.resolve(false);
+      state.user = { ...state.user, mediaWait: null };
+      return Promise.resolve(true);
+    },
     update: (patch: UserPatch) => {
       state.updates.push(patch);
       state.user = { ...state.user, ...patch } as User;
@@ -356,6 +363,10 @@ export function fakeDb(
     messages,
     photos,
     runs,
+    agentRuns: {
+      start: () => Promise.resolve(),
+      finish: () => Promise.resolve(),
+    },
     forRun,
   } as unknown as UserDb;
 

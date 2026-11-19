@@ -1,4 +1,5 @@
 import { config } from "./src/config.ts";
+import { retryMediaWaits } from "./src/bot/media-waits.ts";
 import { sendReminders } from "./src/bot/reminders.ts";
 import { handleUpdate } from "./src/bot/router.ts";
 import { ping } from "./src/db/index.ts";
@@ -23,7 +24,8 @@ Deno.serve(async (req) => {
   if (req.method !== "POST")
     return new Response("method not allowed", { status: 405 });
 
-  if (new URL(req.url).pathname.endsWith("/reminders")) {
+  const path = new URL(req.url).pathname;
+  if (path.endsWith("/reminders") || path.endsWith("/photo-waits")) {
     if (
       !timingSafeEqual(
         req.headers.get("x-cron-secret") ?? "",
@@ -31,7 +33,13 @@ Deno.serve(async (req) => {
       )
     )
       return new Response("unauthorized", { status: 401 });
-    return Response.json({ sent: await sendReminders() });
+    if (path.endsWith("/reminders"))
+      return Response.json({ sent: await sendReminders() });
+    // A retry can run the whole assistant, far past the cron request's timeout.
+    EdgeRuntime.waitUntil(
+      retryMediaWaits().catch((e) => console.error("photo-waits", e)),
+    );
+    return new Response("ok");
   }
 
   // verify_jwt is off for this function, so this header is the only thing proving the caller is Telegram.

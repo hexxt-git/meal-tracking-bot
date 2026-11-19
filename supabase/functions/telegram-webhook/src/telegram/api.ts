@@ -12,6 +12,12 @@ class TelegramError extends Error {
   }
 }
 
+/** Telegram 5xx/429 responses, timeouts and network failures: worth trying again later. */
+export const isUnavailable = (e: unknown) =>
+  e instanceof TypeError ||
+  (e instanceof DOMException && e.name === "TimeoutError") ||
+  (e instanceof TelegramError && (e.status >= 500 || e.status === 429));
+
 /** Retries Telegram 5xx/429 responses, timeouts and network failures. */
 async function withRetry<T>(
   fn: () => Promise<T>,
@@ -21,11 +27,7 @@ async function withRetry<T>(
     try {
       return await fn();
     } catch (e) {
-      const transient =
-        e instanceof TypeError ||
-        (e instanceof DOMException && e.name === "TimeoutError") ||
-        (e instanceof TelegramError && (e.status >= 500 || e.status === 429));
-      if (!transient || attempt >= delaysMs.length) throw e;
+      if (!isUnavailable(e) || attempt >= delaysMs.length) throw e;
       await new Promise((r) => setTimeout(r, delaysMs[attempt]));
     }
   }
@@ -134,8 +136,9 @@ export const telegram = {
     return call("sendDocument", form);
   },
 
-  download: (fileId: string): Promise<Uint8Array> =>
-    withRetry(async () => {
+  /** `once` makes a single attempt, for callers that retry on their own schedule. */
+  download: (fileId: string, { once = false } = {}): Promise<Uint8Array> =>
+    (once ? (fn: () => Promise<Uint8Array>) => fn() : withRetry)(async () => {
       // Telegram's file service can hang for minutes when it's failing; give up early and retry instead.
       const signal = AbortSignal.timeout(20_000);
       const file = await call<{ file_path: string }>(

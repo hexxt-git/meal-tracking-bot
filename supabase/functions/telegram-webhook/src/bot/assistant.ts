@@ -7,6 +7,7 @@ import {
 } from "../agent/index.ts";
 import { config } from "../config.ts";
 import { Meal, Superseded } from "../db/index.ts";
+import type { RunEnd } from "../db/schema.ts";
 import { sumTotals } from "../domain/meal.ts";
 import {
   ActiveRun,
@@ -16,6 +17,7 @@ import {
   isStaleRun,
   Job,
   jobInputs,
+  MediaWait,
   mergeJobs,
   newQuestionId,
   PendingQuestion,
@@ -23,10 +25,10 @@ import {
 import { dayStart, mealTimeLabel } from "../domain/time.ts";
 import { fmtWeight, unitFor, unitsFor } from "../domain/weight.ts";
 import type { PhotoLibrary } from "../agent/tools.ts";
-import { base64, Media, ProviderError } from "../services/llm.ts";
+import { base64, chatModel, Media, ProviderError } from "../services/llm.ts";
 import { resolveProviders } from "./providers.ts";
 import { RESEARCH, RESEARCH_CUTOFF_SHARE } from "../domain/ai-settings.ts";
-import { esc, fittedPhoto, telegram } from "../telegram/api.ts";
+import { esc, fittedPhoto, isUnavailable, telegram } from "../telegram/api.ts";
 import type { CallbackQuery, Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
 import { clock, dayLabel, kcalLeft, mealBody } from "./format.ts";
@@ -192,8 +194,25 @@ async function collectInput(ctx: Ctx, msg: Message): Promise<ChatInput | null> {
   };
 }
 
-/** Only what the model can receive: no photos for a text-only model, no voice notes outside OpenRouter. */
+class MediaUnavailable extends Error {}
+
+/**
+ * Only what the model can receive: no photos for a text-only model, no voice notes outside OpenRouter.
+ * Throws `MediaUnavailable` when Telegram's file service fails or hangs, so the request can wait for it instead.
+ */
 async function downloadMedia(
+  inputs: ChatInput[],
+  can: { images: boolean; audio: boolean },
+): Promise<Media[]> {
+  try {
+    return await fetchMedia(inputs, can);
+  } catch (e) {
+    if (isUnavailable(e)) throw new MediaUnavailable();
+    throw e;
+  }
+}
+
+async function fetchMedia(
   inputs: ChatInput[],
   can: { images: boolean; audio: boolean },
 ): Promise<Media[]> {
@@ -202,7 +221,7 @@ async function downloadMedia(
       input.photoIds.map(async (id) => ({
         kind: "image" as const,
         mime: input.imageMime,
-        data: await telegram.download(id),
+        data: await telegram.download(id, { once: true }),
       })),
     ),
   );
@@ -213,7 +232,7 @@ async function downloadMedia(
             (async () => ({
               kind: "audio" as const,
               format: audioFormat(audio.mime),
-              data: await telegram.download(audio.fileId),
+              data: await telegram.download(audio.fileId, { once: true }),
             }))(),
           ]
         : [],
@@ -263,7 +282,11 @@ async function run(ctx: Ctx, requested: Job) {
   const providers = await resolveProviders(ctx);
   if (!providers) return ctx.send(welcomeView());
   const { settings } = providers;
-  if (!(await ctx.db.limits.hit("ai", config.limits.analysesPerDay, "1 day"))) {
+  requested = await absorbMediaWait(ctx, requested);
+  if (
+    !requested.mediaUntil &&
+    !(await ctx.db.limits.hit("ai", config.limits.analysesPerDay, "1 day"))
+  ) {
     return ctx.send(
       `You've reached the daily limit of ${config.limits.analysesPerDay} requests. It resets at midnight UTC.`,
     );
@@ -310,6 +333,30 @@ async function runClaimed(
   const { input } = job;
   const inputs = jobInputs(job);
   const { chat, settings } = providers;
+  const trace: string[] = [];
+  const log = (line: string) => {
+    console.log(`[agent ${ctx.user.tgId}] ${line}`);
+    if (trace.length < config.agent.storedTraceLines) trace.push(line);
+  };
+  let mediaMs: number | null = null;
+  await ctx.db.agentRuns.start({
+    id: runId,
+    messageIds: inputs.map((i) => i.messageId),
+    photoFileIds: inputs.flatMap((i) => i.photoIds),
+    audioFileIds: inputs.flatMap((i) => (i.audio ? [i.audio.fileId] : [])),
+    mediaUntil: job.mediaUntil ? new Date(job.mediaUntil) : null,
+    model: `${chat.kind}:${chatModel(chat).id}`,
+  });
+  const finish = (end: RunEnd) =>
+    ctx.db.agentRuns.finish(runId, { ...end, mediaMs, trace });
+  const timedDownload = async (can: { images: boolean; audio: boolean }) => {
+    const t = Date.now();
+    try {
+      return await downloadMedia(inputs, can);
+    } finally {
+      mediaMs = Date.now() - t;
+    }
+  };
   const guarded = ctx.db.forRun(runId, () => stop.abort());
   const superseded = () => {
     if (!stop.signal.aborted) return false;
@@ -365,7 +412,7 @@ async function runClaimed(
         text: m.text,
         sentAt: new Date(m.sentAt),
       })),
-      media: await downloadMedia(inputs, can),
+      media: await timedDownload(can),
       photoIds,
       photoRefs: await ctx.db.photos.register(photoIds),
       library: can.images ? photoLibrary(ctx) : undefined,
@@ -383,13 +430,22 @@ async function runClaimed(
         ctx,
         inputs.map((i) => i.messageId),
       ),
-      trace: (line) => console.log(`[agent ${ctx.user.tgId}] ${line}`),
+      trace: log,
       batchId: runId,
       signal: stop.signal,
     });
   } catch (e) {
-    if (superseded() || e instanceof Superseded) return;
+    if (superseded() || e instanceof Superseded)
+      return finish({ outcome: "superseded" });
+    if (e instanceof MediaUnavailable) {
+      await finish({ outcome: "media_unavailable" });
+      return waitForMedia(ctx, runId, job);
+    }
     console.error(`[agent ${ctx.user.tgId}]`, e);
+    await finish({
+      outcome: "failed",
+      error: e instanceof Error ? (e.stack ?? e.message) : String(e),
+    });
     if (!(await ctx.db.runs.commit(runId))) return;
     return ctx.send({
       text: "Something went wrong on my side while handling that.",
@@ -399,8 +455,22 @@ async function runClaimed(
     clearInterval(typing);
   }
   await ctx.db.usage.record(result.costUsd, result.searches);
+  const ended: RunEnd = {
+    turns: result.turns,
+    searches: result.searches,
+    costUsd: result.costUsd,
+    generationIds: result.generationIds,
+    error: result.error
+      ? `${result.error.status} ${result.error.message}`
+      : null,
+  };
   // Past this point the run's changes stand: a newer message waits for the reply instead of undoing them.
-  if (superseded() || !(await ctx.db.runs.commit(runId))) return;
+  if (superseded() || !(await ctx.db.runs.commit(runId)))
+    return finish({ ...ended, outcome: "superseded" });
+  await finish({
+    ...ended,
+    outcome: result.error ? "error" : result.timedOut ? "timed_out" : "ok",
+  });
   const changed =
     result.changes.length +
       result.weightChanges.length +
@@ -452,6 +522,57 @@ async function runClaimed(
   return rememberReply(ctx, sent, replySummary(result));
 }
 
+/**
+ * Holds a request whose media Telegram wouldn't deliver, for the photo-waits job to retry until the deadline.
+ * Only the first failure is announced; later ones stay silent until the deadline passes.
+ */
+async function waitForMedia(ctx: Ctx, runId: string, job: Job) {
+  if (!(await ctx.db.runs.commit(runId))) return;
+  const { mediaUntil, ...plain } = job;
+  console.log(`[agent ${ctx.user.tgId}] media unavailable, waiting`);
+  if (mediaUntil && Date.parse(mediaUntil) <= Date.now()) {
+    return ctx.send({
+      text: `Telegram still isn't delivering your ${mediaNoun(plain)} after ${config.mediaWait.minutes} minutes, so I couldn't read it. Tap Retry or send it again later.`,
+      keyboard: retryKeyboard(await saveForRetry(ctx, plain)),
+    });
+  }
+  const wait: MediaWait = {
+    id: newQuestionId(),
+    job: plain,
+    until:
+      mediaUntil ??
+      new Date(Date.now() + config.mediaWait.minutes * 60_000).toISOString(),
+  };
+  ctx.user = await ctx.db.users.update({ mediaWait: wait });
+  if (!mediaUntil)
+    await ctx.send(
+      `Telegram isn't delivering your ${mediaNoun(plain)} right now. I'll keep trying for the next ${config.mediaWait.minutes} minutes and reply as soon as it comes through.`,
+    );
+}
+
+const mediaNoun = (job: Job) => {
+  const inputs = jobInputs(job);
+  const photos = inputs.reduce((n, i) => n + i.photoIds.length, 0);
+  if (!photos) return "voice note";
+  return photos === 1 ? "photo" : "photos";
+};
+
+/** A newer message takes the waiting request with it, so the retry and the new message don't both run. */
+async function absorbMediaWait(ctx: Ctx, job: Job): Promise<Job> {
+  const wait = ctx.user.mediaWait;
+  if (!wait || job.mediaUntil) return job;
+  const merged = mergeJobs(wait.job, job);
+  if (!merged || !(await ctx.db.users.takeMediaWait(wait.id))) return job;
+  return merged;
+}
+
+/** Runs the user's waiting request again. Called by the photo-waits job. */
+export async function retryMediaWait(ctx: Ctx) {
+  const wait = ctx.user.mediaWait;
+  if (!wait || !(await ctx.db.users.takeMediaWait(wait.id))) return;
+  return run(ctx, { ...wait.job, mediaUntil: wait.until });
+}
+
 /** Keeps the profile weight at the latest weigh-in; the very first weigh-in also sets the display units. */
 async function syncProfileWeight(ctx: Ctx, first: boolean, r: AgentResult) {
   const [latest] = await ctx.db.weights.recent(1);
@@ -476,7 +597,7 @@ async function editContext(
 }
 
 /** Keeps the job so a Retry or Continue button can start it again; returns the id the button carries. */
-async function saveForRetry(ctx: Ctx, job: Job) {
+async function saveForRetry(ctx: Ctx, { mediaUntil: _, ...job }: Job) {
   const id = newQuestionId();
   ctx.user = await ctx.db.users.update({ retryRun: { ...job, id } });
   return id;

@@ -37,6 +37,8 @@ export const config = {
     runStaleMs: 150_000,
     /** How often a run checks it still holds the slot, and a waiting message checks whether it's free. */
     runPollMs: 1_000,
+    /** Trace lines (tool calls and results) kept in app.agent_runs per run. */
+    storedTraceLines: 200,
   },
   research: {
     /** OpenRouter search engine. "native" (Google Search for Gemini) measured $0.085 per search, too much for the budget. */
@@ -45,5 +47,7 @@ export const config = {
     timeoutMs: 45_000,
     maxOutputTokens: 800,
   },
+  /** A request whose media Telegram won't deliver is retried by the photo-waits job (every 20 s) for this long. */
+  mediaWait: { minutes: 15 },
   albumSettleMs: 2500,
 } as const;

@@ -19,6 +19,7 @@ import type { Step, Units } from "../domain/onboarding.ts";
 import type { AiSettings, AwaitingInput } from "../domain/ai-settings.ts";
 import type {
   ActiveRun,
+  MediaWait,
   PendingQuestion,
   SavedRun,
 } from "../domain/question.ts";
@@ -62,6 +63,7 @@ export const users = app.table("users", {
   pendingQuestion: jsonb("pending_question").$type<PendingQuestion>(),
   retryRun: jsonb("retry_run").$type<SavedRun>(),
   agentRun: jsonb("agent_run").$type<ActiveRun>(),
+  mediaWait: jsonb("photo_wait").$type<MediaWait>(),
   aiSettings: jsonb("ai_settings")
     .$type<Partial<AiSettings>>()
     .notNull()
@@ -182,6 +184,49 @@ export const userNotes = app.table("user_notes", {
   createdAt: tstz("created_at").notNull().defaultNow(),
   updatedAt: tstz("updated_at").notNull().defaultNow(),
 });
+
+export const agentRuns = app.table("agent_runs", {
+  id: uuid("id").primaryKey(),
+  tgId: tgId(),
+  startedAt: tstz("started_at").notNull().defaultNow(),
+  finishedAt: tstz("finished_at"),
+  outcome: text("outcome").$type<RunOutcome>(),
+  messageIds: bigint("message_ids", { mode: "number" })
+    .array()
+    .notNull()
+    .default([]),
+  photoFileIds: text("photo_file_ids").array().notNull().default([]),
+  audioFileIds: text("audio_file_ids").array().notNull().default([]),
+  mediaUntil: tstz("media_until"),
+  mediaMs: integer("media_ms"),
+  model: text("model"),
+  turns: integer("turns"),
+  searches: integer("searches"),
+  costUsd: decimal("cost_usd"),
+  generationIds: text("generation_ids").array().notNull().default([]),
+  error: text("error"),
+  trace: text("trace").array().notNull().default([]),
+});
+
+export type RunOutcome =
+  "ok" | "error" | "timed_out" | "superseded" | "media_unavailable" | "failed";
+export type RunStart = Pick<
+  typeof agentRuns.$inferInsert,
+  "id" | "messageIds" | "photoFileIds" | "audioFileIds" | "mediaUntil" | "model"
+>;
+export type RunEnd = Partial<
+  Pick<
+    typeof agentRuns.$inferInsert,
+    | "outcome"
+    | "mediaMs"
+    | "turns"
+    | "searches"
+    | "costUsd"
+    | "generationIds"
+    | "error"
+    | "trace"
+  >
+>;
 
 export type Note = typeof userNotes.$inferSelect;
 
