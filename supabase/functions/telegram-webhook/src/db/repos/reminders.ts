@@ -8,9 +8,10 @@ export type DueReminder = { tgId: number; chatId: number; hours: number };
 export function remindersRepo(run: Run) {
   return {
     /**
-     * Picks users whose latest meal (or signup, if none) is at least one threshold old and who haven't had that
-     * threshold's reminder yet, and marks them as reminded. Only the highest due threshold is returned per user.
-     * A threshold that passed over 12 h ago is never sent late (e.g. after downtime or for long-inactive users).
+     * Picks users whose latest meal (by when it was eaten, or signup if none) is at least one threshold old and who
+     * haven't had that threshold's reminder yet, and marks them as reminded. Only the highest due threshold is returned
+     * per user. A threshold that passed over 12 h ago is never sent late (e.g. after downtime or for long-inactive
+     * users), and neither is one that passed before the latest meal was logged (a meal logged hours after eating).
      * Thresholds in `quiet.hours` are left out while the user's local time is before `quiet.until` o'clock.
      * The `last_reminder_at is not distinct from` check makes a concurrent run skip rows this one already claimed.
      */
@@ -26,11 +27,14 @@ export function remindersRepo(run: Run) {
               (select max(h) from unnest(${`{${hours.join(",")}}`}::int[]) h
                 where l.last_meal_at + make_interval(hours => h) <= now()
                   and l.last_meal_at + make_interval(hours => h) > now() - interval '12 hours'
+                  and l.last_meal_at + make_interval(hours => h) > l.last_logged_at
                   and not (h = any(${`{${quiet.hours.join(",")}}`}::int[])
                     and extract(hour from now() + make_interval(mins => u.utc_offset_minutes)) < ${quiet.until})) as hours
             from app.users u
             cross join lateral (
-              select coalesce(max(m.logged_at), u.created_at) as last_meal_at from app.meals m where m.tg_id = u.tg_id
+              select coalesce(max(m.eaten_at), u.created_at) as last_meal_at,
+                coalesce(max(m.logged_at), u.created_at) as last_logged_at
+              from app.meals m where m.tg_id = u.tg_id
             ) l
             where u.reminders_enabled and u.onboarding_step = 'done'
           )

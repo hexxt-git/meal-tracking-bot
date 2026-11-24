@@ -1,4 +1,4 @@
-/** Hours without a logged meal after which a reminder is sent, once each, until the next meal is logged. */
+/** Hours since the last meal was eaten after which a reminder is sent, once each, until the next meal is logged. */
 export const REMINDER_HOURS = [6, 8, 12, 14, 18, 24, 48, 72];
 
 /** These reminders are skipped from 00:00 to `until` in the user's local time; a later one can still go out. */
