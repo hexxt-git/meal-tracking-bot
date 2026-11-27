@@ -73,7 +73,7 @@ Deno.test("day view shows the left line and day navigation", async () => {
   assertEquals(buttons(yesterday).at(-2), ["day:2", "day:0"]);
 });
 
-Deno.test("current week runs from Sunday to today", async () => {
+Deno.test("current week lists all seven days from Sunday", async () => {
   const back = weekStartDaysAgo(0, 0);
   const sunday = dayStart(0, back);
   const { ctx } = fakeCtx({
@@ -90,7 +90,8 @@ Deno.test("current week runs from Sunday to today", async () => {
   const rows = plain(v)
     .split("\n")
     .filter((l) => /^\w{3} \d/.test(l));
-  assertEquals(rows.length, back + 1);
+  assertEquals(rows.length, 7);
+  assert(rows[6].startsWith("Sat"), rows[6]);
   assert(rows[0].startsWith("Sun"), rows[0]);
   assertStringIncludes(rows[0], "1,000");
   assertStringIncludes(rows[0], "P 83g");

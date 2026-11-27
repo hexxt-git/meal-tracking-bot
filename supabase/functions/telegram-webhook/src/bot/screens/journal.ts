@@ -60,11 +60,11 @@ export async function dayView(ctx: Ctx, daysAgo: number): Promise<View> {
   };
 }
 
-/** Sunday to Saturday; the current week lists days up to today. */
+/** Sunday to Saturday; days with nothing logged, including the rest of the current week, show –. */
 export async function weekView(ctx: Ctx, weeksAgo = 0): Promise<View> {
   const off = ctx.user.utcOffsetMinutes;
   const first = weekStartDaysAgo(off, weeksAgo);
-  const last = Math.max(0, first - 6);
+  const last = first - 6;
   const from = dayStart(off, first);
   const days = groupByLocalDay(
     await ctx.db.meals.between(from, dayStart(off, last - 1)),
@@ -79,10 +79,12 @@ export async function weekView(ctx: Ctx, weeksAgo = 0): Promise<View> {
     lines.push([
       localDayLabel(start, off).slice(0, 6),
       meals.length ? num(kcal) : "–",
-      meals.length ? `P ${Math.round(proteinG)}g` : "",
       meals.length ? bar(kcal, goal ?? 2500) : "",
+      meals.length ? `${Math.round(proteinG)}g` : "",
     ]);
   }
+  const gramsWidth = Math.max(...lines.map((l) => l[3].length));
+  for (const l of lines) if (l[3]) l[3] = `P ${l[3].padStart(gramsWidth)}`;
   const logged = [...days.values()];
   const average = (key: "kcal" | "proteinG") =>
     logged.length
@@ -97,7 +99,7 @@ export async function weekView(ctx: Ctx, weeksAgo = 0): Promise<View> {
     weeksAgo === 0 ? "This week" : weeksAgo === 1 ? "Last week" : "Week";
   const range = `${localDayLabel(from, off).slice(4)} – ${localDayLabel(dayStart(off, first - 6), off).slice(4)}`;
   return {
-    text: `<b>${name}</b>  ·  ${range}\n\n${table(lines, ["l", "r", "r", "l"])}${summary}`,
+    text: `<b>${name}</b>  ·  ${range}\n\n${table(lines, ["l", "r", "l", "l"])}${summary}`,
     keyboard: [
       [
         btn("‹ Previous week", `week:${weeksAgo + 1}`),
