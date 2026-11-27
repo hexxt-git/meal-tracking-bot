@@ -75,27 +75,29 @@ export async function weekView(ctx: Ctx, weeksAgo = 0): Promise<View> {
   for (let i = first; i >= last; i--) {
     const start = dayStart(off, i);
     const meals = days.get(localTime(start, off).slice(0, 10)) ?? [];
-    const kcal = sumTotals(meals).kcal;
+    const { kcal, proteinG } = sumTotals(meals);
     lines.push([
       localDayLabel(start, off).slice(0, 6),
       meals.length ? num(kcal) : "–",
+      meals.length ? `P ${Math.round(proteinG)}g` : "",
       meals.length ? bar(kcal, goal ?? 2500) : "",
     ]);
   }
   const logged = [...days.values()];
-  const avg = logged.length
-    ? Math.round(
-        logged.reduce((s, m) => s + sumTotals(m).kcal, 0) / logged.length,
-      )
-    : 0;
+  const average = (key: "kcal" | "proteinG") =>
+    logged.length
+      ? Math.round(
+          logged.reduce((s, m) => s + sumTotals(m)[key], 0) / logged.length,
+        )
+      : 0;
   const summary = logged.length
-    ? `Average ${num(avg)} kcal over ${logged.length} logged day${logged.length > 1 ? "s" : ""}${goal ? `  ·  goal ${num(goal)}` : ""}`
+    ? `Average ${num(average("kcal"))} kcal, P ${average("proteinG")}g over ${logged.length} logged day${logged.length > 1 ? "s" : ""}${goal ? `  ·  goal ${num(goal)}` : ""}`
     : "Nothing logged this week.";
   const name =
     weeksAgo === 0 ? "This week" : weeksAgo === 1 ? "Last week" : "Week";
   const range = `${localDayLabel(from, off).slice(4)} – ${localDayLabel(dayStart(off, first - 6), off).slice(4)}`;
   return {
-    text: `<b>${name}</b>  ·  ${range}\n\n${table(lines, ["l", "r", "l"])}${summary}`,
+    text: `<b>${name}</b>  ·  ${range}\n\n${table(lines, ["l", "r", "r", "l"])}${summary}`,
     keyboard: [
       [
         btn("‹ Previous week", `week:${weeksAgo + 1}`),

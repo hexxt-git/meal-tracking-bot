@@ -78,7 +78,11 @@ Deno.test("current week runs from Sunday to today", async () => {
   const sunday = dayStart(0, back);
   const { ctx } = fakeCtx({
     meals: [
-      meal({ eatenAt: new Date(sunday.getTime() + HOUR), kcal: 1000 }),
+      meal({
+        eatenAt: new Date(sunday.getTime() + HOUR),
+        kcal: 1000,
+        proteinG: 82.6,
+      }),
       meal({ eatenAt: new Date(sunday.getTime() - HOUR), kcal: 9999 }),
     ],
   });
@@ -89,9 +93,10 @@ Deno.test("current week runs from Sunday to today", async () => {
   assertEquals(rows.length, back + 1);
   assert(rows[0].startsWith("Sun"), rows[0]);
   assertStringIncludes(rows[0], "1,000");
+  assertStringIncludes(rows[0], "P 83g");
   assert(!plain(v).includes("9,999"));
   assertStringIncludes(plain(v), "This week");
-  assertStringIncludes(plain(v), "Average 1,000 kcal over 1 logged day");
+  assertStringIncludes(plain(v), "Average 1,000 kcal, P 83g over 1 logged day");
   assertEquals(buttons(v)[0], ["week:1"]);
 });
 
