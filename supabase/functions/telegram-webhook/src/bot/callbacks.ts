@@ -23,6 +23,7 @@ import { editGoal, goalsView, recalcGoals, saveGoal } from "./screens/goals.ts";
 import {
   dayView,
   deleteMeal,
+  logAgain,
   exportCsv,
   historyView,
   importHelpView,
@@ -62,6 +63,7 @@ const HANDLERS: Record<string, Handler> = {
   }),
   del: (ctx, [id, origin]) => deleteMeal(ctx, id, origin),
   undo: (ctx, [batchId, origin]) => undo(ctx, batchId, origin),
+  again: (ctx, [id]) => logAgain(ctx, id),
   wt: async (ctx, [page]) => ({ view: await weightView(ctx, int(page)) }),
   wte: async (ctx, [id, page]) => ({
     view: await weightEntryView(ctx, id, int(page)),

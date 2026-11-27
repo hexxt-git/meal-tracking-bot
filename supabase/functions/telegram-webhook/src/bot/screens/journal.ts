@@ -15,6 +15,7 @@ import type { Ctx } from "../context.ts";
 import {
   clock,
   dayLabel,
+  kcalLeft,
   mealBody,
   mealButtonLabel,
   progressTable,
@@ -161,7 +162,53 @@ export async function mealView(
       ],
       ["l", "l"],
     )}${mealBody(m)}`,
-    keyboard: [[btn("Delete", `del:${m.id}:${origin}`), backButton(origin)]],
+    keyboard: [
+      [
+        btn("Again", `again:${m.id}`),
+        btn("Delete", `del:${m.id}:${origin}`),
+        backButton(origin),
+      ],
+    ],
+  };
+}
+
+/** "Today  1,840 / 2,420 kcal  ·  580 kcal left", under a reply that logged meals. */
+export async function todayLine(ctx: Ctx): Promise<string> {
+  const today = sumTotals(
+    await ctx.db.meals.since(dayStart(ctx.user.utcOffsetMinutes)),
+  );
+  const target = ctx.user.targetKcal;
+  return `Today  ${num(today.kcal)}${target ? ` / ${num(target)}` : ""} kcal${target ? `  ·  ${kcalLeft(today.kcal, target)}` : ""}`;
+}
+
+/** Logs a copy of a meal as eaten now, without the assistant, and sends it as a new message. */
+export async function logAgain(ctx: Ctx, mealId: string): Promise<Reply> {
+  const m = await ctx.db.meals.byId(mealId);
+  if (!m) return { toast: "This meal no longer exists" };
+  const now = new Date();
+  const { meal, batchId } = await ctx.db.meals.create({
+    eatenAt: now,
+    loggedAt: now,
+    description: m.description,
+    items: m.items,
+    kcal: m.kcal,
+    proteinG: m.proteinG,
+    carbsG: m.carbsG,
+    fatG: m.fatG,
+    photoFileIds: m.photoFileIds,
+  });
+  return {
+    toast: "Logged again",
+    send: {
+      text: `Logged again: <b>${esc(meal.description)}</b>  ·  ${clock(meal.eatenAt, ctx.user)}\n\n${mealBody(meal)}\n\n${await todayLine(ctx)}`,
+      keyboard: [
+        [
+          btn("Undo", `undo:${batchId}`),
+          btn("Again", `again:${meal.id}`),
+          btn("Today", "today"),
+        ],
+      ],
+    },
   };
 }
 

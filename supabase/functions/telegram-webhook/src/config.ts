@@ -4,6 +4,23 @@ function env(name: string): string {
   return value;
 }
 
+export type DefaultProvider = {
+  baseUrl: string;
+  model: string;
+  token: string | null;
+};
+
+/**
+ * Bot-wide OpenAI-compatible provider for users without their own key or provider, from the DEFAULT_AI_* env vars;
+ * null when unset, and then new users must bring a key. Read per call so tests can change it.
+ */
+export function defaultProvider(): DefaultProvider | null {
+  const baseUrl = Deno.env.get("DEFAULT_AI_BASE_URL");
+  const model = Deno.env.get("DEFAULT_AI_MODEL");
+  if (!baseUrl || !model) return null;
+  return { baseUrl, model, token: Deno.env.get("DEFAULT_AI_TOKEN") || null };
+}
+
 export const config = {
   telegramToken: env("TELEGRAM_BOT_TOKEN"),
   webhookSecret: env("TELEGRAM_WEBHOOK_SECRET"),

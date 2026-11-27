@@ -20,7 +20,7 @@ import {
   keyPromptView,
   saveKey,
   stepView,
-  welcomeView,
+  welcome,
 } from "./screens/onboarding.ts";
 import { LOG_HINT, REPLY_KEYBOARD, REPLY_KEYS, Reply, View } from "./ui.ts";
 
@@ -43,7 +43,7 @@ async function showReply(ctx: Ctx, reply: Promise<Reply>) {
 
 const COMMANDS: Record<string, Command> = {
   start: (ctx) => {
-    if (ctx.user.onboardingStep === "key") return ctx.send(welcomeView());
+    if (ctx.user.onboardingStep === "key") return show(ctx, welcome(ctx));
     if (ctx.user.onboardingStep !== "done") return ctx.send(stepView(ctx));
     return telegram.sendWithReplyKeyboard(
       ctx.user.chatId,

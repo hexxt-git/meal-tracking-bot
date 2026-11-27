@@ -13,6 +13,7 @@ import {
   historyView,
   importCsv,
   isCsvFile,
+  logAgain,
   mealView,
 } from "../src/bot/screens/journal.ts";
 import { onboardingAction, stepView } from "../src/bot/screens/onboarding.ts";
@@ -105,9 +106,11 @@ Deno.test("history pages and meal origin round-trip", async () => {
   assertEquals(buttons(second).at(-2), ["hist:0"]);
 
   const v = await mealView(ctx, meals[0].id, "h1");
-  assertEquals(buttons(v), [[`del:${meals[0].id}:h1`, "hist:1"]]);
+  assertEquals(buttons(v), [
+    [`again:${meals[0].id}`, `del:${meals[0].id}:h1`, "hist:1"],
+  ]);
   const fromDay = await mealView(ctx, meals[0].id, "d3");
-  assertEquals(buttons(fromDay)[0][1], "day:3");
+  assertEquals(buttons(fromDay)[0].at(-1), "day:3");
   assertStringIncludes(
     plain(await mealView(ctx, "nope", "d0")),
     "no longer exists",
@@ -347,4 +350,30 @@ Deno.test("memory lists notes ten per page and deletes one", async () => {
   const r = await deleteNote(ctx, state.notes[0].id, 0);
   assertEquals(r.toast, "Forgotten");
   assertEquals(state.notes.length, 11);
+});
+
+Deno.test("Again logs a copy of the meal as eaten now", async () => {
+  const old = meal({
+    description: "BS Brut biscuit pack",
+    kcal: 176,
+    eatenAt: new Date(Date.now() - 3 * 3_600_000),
+    loggedAt: new Date(Date.now() - 3 * 3_600_000),
+  });
+  const { ctx, state } = fakeCtx({ meals: [old] });
+  const r = await logAgain(ctx, old.id);
+  assertEquals(state.meals.length, 2);
+  const copy = state.meals[1];
+  assertEquals(copy.description, "BS Brut biscuit pack");
+  assertEquals(copy.kcal, 176);
+  assert(Date.now() - copy.eatenAt.getTime() < 5_000);
+  assertStringIncludes(r.send!.text, "Logged again");
+  assert(
+    buttons(r.send!)
+      .flat()
+      .some((b) => b.startsWith("undo:")),
+  );
+  assertEquals(
+    (await logAgain(ctx, "missing")).toast,
+    "This meal no longer exists",
+  );
 });

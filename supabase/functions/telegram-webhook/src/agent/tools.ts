@@ -8,6 +8,8 @@ import {
   MealItem,
   READ_WINDOW_DAYS,
   sanitizeItems,
+  SEARCH_LIMIT,
+  searchTerms,
 } from "../domain/meal.ts";
 import { dayStart, localStamp, parseEatenAt } from "../domain/time.ts";
 import {
@@ -20,7 +22,7 @@ import {
 
 export type MealStore = Pick<
   UserDb["meals"],
-  "byId" | "since" | "create" | "update" | "delete"
+  "byId" | "since" | "search" | "create" | "update" | "delete"
 >;
 
 export type WeightStore = Pick<
@@ -429,6 +431,24 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
       },
     }),
     tool({
+      name: "search_meals",
+      label: "Search meals",
+      description: `Searches all of the user's past meals, any date, by words in the meal title or item names (e.g. "bania merguez", "skyr", "bs brut"). Returns up to ${SEARCH_LIMIT}, the most matching words first, then newest. Free.`,
+      parameters: Type.Object({
+        query: Type.String({
+          description:
+            "A few key words: product or brand, dish, place. Try other spellings if nothing comes back.",
+        }),
+      }),
+      execute: async (_id, p) => {
+        const terms = searchTerms(p.query);
+        if (!terms.length)
+          throw new Error("Give at least one word to search for");
+        const meals = await run.o.store.search(terms, SEARCH_LIMIT);
+        return ok(meals.length ? await run.views(meals) : { found: 0 });
+      },
+    }),
+    tool({
       name: "log_meal",
       label: "Log meal",
       description: "Records a new meal.",
@@ -594,10 +614,10 @@ export function mealTools(run: RunState, canAsk: boolean): AgentTool[] {
       name: "ask_user",
       label: "Ask user",
       description:
-        "Shows the user a multiple-choice question as buttons and ends this turn. Only when strictly necessary.",
+        "Shows the user a multiple-choice question as buttons and ends this turn. Use it when an unknown would change the log noticeably (see ASKING).",
       parameters: Type.Object({
         question: Type.String(),
-        options: Type.Array(Type.String({ maxLength: 30 }), {
+        options: Type.Array(Type.String({ maxLength: 40 }), {
           minItems: 2,
           maxItems: 4,
         }),

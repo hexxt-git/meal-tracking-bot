@@ -4,6 +4,7 @@ import type { Meal, Note, User, UserDb, Weight } from "../../src/db/index.ts";
 import type { NewMeal, NewWeight, UserPatch } from "../../src/db/schema.ts";
 import { Superseded } from "../../src/db/index.ts";
 import type { ActiveRun } from "../../src/domain/question.ts";
+import { searchScore } from "../../src/domain/meal.ts";
 
 export const user = (patch: Partial<User> = {}): User => ({
   tgId: 1,
@@ -118,6 +119,16 @@ export function fakeDb(
           state.meals.filter((m) => m.loggedAt >= from),
           (m) => m.loggedAt,
         ),
+      ),
+    search: (terms: string[], limit: number) =>
+      Promise.resolve(
+        byEaten()
+          .reverse()
+          .map((m) => ({ m, score: searchScore(m, terms) }))
+          .filter((x) => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit)
+          .map((x) => x.m),
       ),
     all: () => Promise.resolve(byEaten()),
     page: (page: number, size: number) => {

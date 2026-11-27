@@ -10,6 +10,7 @@ import type {
   Connection,
   ResearchProvider,
 } from "../services/llm.ts";
+import { defaultProvider } from "../config.ts";
 import type { Ctx } from "./context.ts";
 
 export type Providers = {
@@ -33,8 +34,35 @@ export async function connectionFor(
   };
 }
 
+/** The bot-wide provider as a chat and research provider, for users who haven't set up their own. */
+function fallbackProviders(settings: AiSettings): Providers | null {
+  const d = defaultProvider();
+  if (!d) return null;
+  const connection: Connection = {
+    baseUrl: d.baseUrl,
+    token: d.token,
+    auth: d.token ? "bearer" : "none",
+    authHeader: "api-key",
+    headers: {},
+  };
+  return {
+    chat: {
+      kind: "custom",
+      connection,
+      model: d.model,
+      images: true,
+      reasoningParam: "reasoning_effort",
+    },
+    research:
+      RESEARCH[settings.researchDepth].lookups === 0
+        ? null
+        : { kind: "custom", connection, model: d.model },
+    settings,
+  };
+}
+
 /**
- * The enabled custom provider, else OpenRouter. Research uses the custom provider's research model when one is set,
+ * The enabled custom provider, else OpenRouter, else the bot-wide default provider. Research uses the custom provider's research model when one is set,
  * else OpenRouter when there is a key; null when neither applies or research is off. Null overall without a usable
  * chat provider.
  */
@@ -57,7 +85,7 @@ export async function resolveProviders(ctx: Ctx): Promise<Providers | null> {
       : openRouterKey
         ? { kind: "openrouter", apiKey: openRouterKey }
         : null;
-  if (!chat) return null;
+  if (!chat) return fallbackProviders(settings);
 
   const depth = RESEARCH[settings.researchDepth];
   const research: ResearchProvider | null =

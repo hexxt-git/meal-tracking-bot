@@ -14,6 +14,29 @@ export const EDIT_WINDOW_HOURS = 24;
 /** How far back the assistant may read meals (by eaten time), and the oldest eaten time it may set. */
 export const READ_WINDOW_DAYS = 7;
 
+/** Past meals search_meals returns per query. */
+export const SEARCH_LIMIT = 8;
+
+/** Lowercased words of a meal search, without very short ones; a meal matching more of them ranks higher. */
+export function searchTerms(query: string): string[] {
+  const words = query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length >= 2);
+  return [...new Set(words)].slice(0, 6);
+}
+
+/** How many of the terms appear in the meal's title or item names. */
+export function searchScore(
+  meal: { description: string; items: { name: string }[] },
+  terms: string[],
+): number {
+  const hay = [meal.description, ...meal.items.map((i) => i.name)]
+    .join(" ")
+    .toLowerCase();
+  return terms.filter((t) => hay.includes(t)).length;
+}
+
 export const isEditable = (loggedAt: Date, now: number) =>
   now - loggedAt.getTime() <= EDIT_WINDOW_HOURS * HOUR_MS;
 

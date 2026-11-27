@@ -522,7 +522,7 @@ Deno.test("prompt switches research and asking sections", () => {
       "Web research is unavailable",
     ),
   );
-  assert(systemPrompt(ctx()).includes("Call ask_user only when"));
+  assert(systemPrompt(ctx()).includes("Call ask_user when"));
   assert(
     systemPrompt(ctx({ canAsk: false })).includes(
       "No more questions for this message",

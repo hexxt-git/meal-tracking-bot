@@ -8,6 +8,7 @@ import { advancedAction, providerAction } from "../src/bot/screens/advanced.ts";
 import { isGoalField } from "../src/domain/goals.ts";
 import { parseChoice } from "../src/domain/onboarding.ts";
 import { resolveProviders } from "../src/bot/providers.ts";
+import { welcome } from "../src/bot/screens/onboarding.ts";
 import { editGoal, recalcGoals, saveGoal } from "../src/bot/screens/goals.ts";
 import { ProviderError } from "../src/services/provider-error.ts";
 import { dayStart } from "../src/domain/time.ts";
@@ -102,7 +103,9 @@ Deno.test("meal reply shows today's total with what is left", async () => {
   );
   assertStringIncludes(plain(v), "Today  1,620 / 2,300 kcal  ·  680 kcal left");
   assertStringIncludes(v.text, "a &lt;b&gt; c");
-  assertEquals(buttons(v), [["undo:b1", `fix:${m.id}`, "today"]]);
+  assertEquals(buttons(v), [
+    ["undo:b1", `fix:${m.id}`, `again:${m.id}`, "today"],
+  ]);
 
   ctx.user = user();
   const noGoal = await resultView(
@@ -344,3 +347,49 @@ Deno.test("forged settings and onboarding values are rejected", async () => {
   assertEquals(await providerAction(ctx, ["in"]), {});
   assertEquals(state.updates, []);
 });
+
+Deno.test(
+  "the bot-wide default provider serves users without their own setup",
+  async () => {
+    const { ctx } = fakeCtx();
+    // deno-lint-ignore no-explicit-any
+    const keys = ctx.db.keys as any;
+    Deno.env.set("DEFAULT_AI_BASE_URL", "https://default.example/v1");
+    Deno.env.set("DEFAULT_AI_MODEL", "dm");
+    try {
+      const d = await resolveProviders(ctx);
+      assertEquals(d?.chat.kind, "custom");
+      assertEquals(d?.research?.kind, "custom");
+
+      keys.get = () => Promise.resolve("sk-or-key");
+      assertEquals(
+        (await resolveProviders(ctx))?.chat.kind,
+        "openrouter",
+        "the user's own key wins",
+      );
+    } finally {
+      Deno.env.delete("DEFAULT_AI_BASE_URL");
+      Deno.env.delete("DEFAULT_AI_MODEL");
+    }
+  },
+);
+
+Deno.test(
+  "new users skip the key step when a default provider exists",
+  async () => {
+    const { ctx } = fakeCtx({ user: user({ onboardingStep: "key" }) });
+    assertStringIncludes((await welcome(ctx)).text, "OpenRouter API key");
+    assertEquals(ctx.user.onboardingStep, "key");
+
+    Deno.env.set("DEFAULT_AI_BASE_URL", "https://default.example/v1");
+    Deno.env.set("DEFAULT_AI_MODEL", "dm");
+    try {
+      const view = await welcome(ctx);
+      assertEquals(ctx.user.onboardingStep, "units");
+      assertStringIncludes(view.text, "Which units do you use?");
+    } finally {
+      Deno.env.delete("DEFAULT_AI_BASE_URL");
+      Deno.env.delete("DEFAULT_AI_MODEL");
+    }
+  },
+);

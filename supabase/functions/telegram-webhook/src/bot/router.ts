@@ -9,7 +9,7 @@ import { createCtx, Ctx } from "./context.ts";
 import { respond, respondToEdit } from "./assistant.ts";
 import { handleSettingInput } from "./screens/advanced.ts";
 import { importCsv, isCsvFile } from "./screens/journal.ts";
-import { saveKey, stepView, welcomeView } from "./screens/onboarding.ts";
+import { saveKey, stepView, welcome } from "./screens/onboarding.ts";
 
 export async function handleUpdate(update: Update) {
   const chat =
@@ -69,7 +69,7 @@ async function routeMessage(ctx: Ctx, msg: Message) {
   if (text?.startsWith("/")) return runCommand(ctx, msg);
   if (await handleSettingInput(ctx, msg)) return;
   if (text && looksLikeKey(text)) return saveKey(ctx, text, msg.message_id);
-  if (ctx.user.onboardingStep === "key") return ctx.send(welcomeView());
+  if (ctx.user.onboardingStep === "key") return ctx.send(await welcome(ctx));
   if (msg.document && isCsvFile(msg.document))
     return importCsv(ctx, msg.document);
   const nav = text ? runReplyKey(ctx, text) : null;

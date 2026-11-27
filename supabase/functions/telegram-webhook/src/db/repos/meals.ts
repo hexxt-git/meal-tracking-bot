@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lt } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { Run, Tx } from "../client.ts";
 import {
   Meal,
@@ -69,6 +80,27 @@ export function mealsRepo(run: Run) {
               .orderBy(asc(meals.eatenAt));
           })
         : Promise.resolve([]),
+
+    /** All-time meals whose title or item names contain the most terms (any one is enough), then newest first. */
+    search: (terms: string[], limit: number) => {
+      if (!terms.length) return Promise.resolve([]);
+      const matches = terms.map(
+        (t) =>
+          sql`(${meals.description} || ' ' || jsonb_path_query_array(${meals.items}, '$[*].name')::text) ilike ${`%${t.replace(/[\\%_]/g, "\\$&")}%`}`,
+      );
+      const score = sql.join(
+        matches.map((m) => sql`(case when ${m} then 1 else 0 end)`),
+        sql` + `,
+      );
+      return run((tx) =>
+        tx
+          .select()
+          .from(meals)
+          .where(or(...matches))
+          .orderBy(desc(score), desc(meals.eatenAt))
+          .limit(limit),
+      );
+    },
 
     since: (from: Date) =>
       run((tx) =>

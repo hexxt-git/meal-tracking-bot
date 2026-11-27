@@ -8,7 +8,6 @@ import {
 import { config } from "../config.ts";
 import { Meal, Superseded } from "../db/index.ts";
 import type { RunEnd } from "../db/schema.ts";
-import { sumTotals } from "../domain/meal.ts";
 import {
   ActiveRun,
   ChatInput,
@@ -22,7 +21,7 @@ import {
   newQuestionId,
   PendingQuestion,
 } from "../domain/question.ts";
-import { dayStart, mealTimeLabel } from "../domain/time.ts";
+import { mealTimeLabel } from "../domain/time.ts";
 import { fmtWeight, unitFor, unitsFor } from "../domain/weight.ts";
 import type { PhotoLibrary } from "../agent/tools.ts";
 import { base64, chatModel, Media, ProviderError } from "../services/llm.ts";
@@ -31,8 +30,9 @@ import { RESEARCH, RESEARCH_CUTOFF_SHARE } from "../domain/ai-settings.ts";
 import { esc, fittedPhoto, isUnavailable, telegram } from "../telegram/api.ts";
 import type { CallbackQuery, Message } from "../telegram/types.ts";
 import type { Ctx } from "./context.ts";
-import { clock, dayLabel, kcalLeft, mealBody } from "./format.ts";
+import { clock, dayLabel, mealBody } from "./format.ts";
 import { welcomeView } from "./screens/onboarding.ts";
+import { todayLine } from "./screens/journal.ts";
 import { btn, LOG_HINT, num, Reply, rows, View } from "./ui.ts";
 
 const DAY_MS = 86_400_000;
@@ -505,7 +505,7 @@ async function runClaimed(
       text: `${esc(q.question)}\n\n<i>Tap an answer or type your own.</i>`,
       keyboard: rows(
         q.options.map((o, i) => btn(o, `ask:${q.id}:${i}`)),
-        2,
+        q.options.some((o) => o.length > 20) ? 1 : 2,
       ),
     });
     return rememberReply(
@@ -736,16 +736,9 @@ export async function resultView(
 
   if (!r.changes.length && !r.weightChanges.length)
     return { text: parts.join("\n\n"), keyboard: [] };
-  if (r.changes.length) {
-    const today = sumTotals(
-      await ctx.db.meals.since(dayStart(ctx.user.utcOffsetMinutes)),
-    );
-    const target = ctx.user.targetKcal;
-    parts.push(
-      `Today  ${num(today.kcal)}${target ? ` / ${num(target)}` : ""} kcal${target ? `  ·  ${kcalLeft(today.kcal, target)}` : ""}`,
-    );
-  }
+  if (r.changes.length) parts.push(await todayLine(ctx));
   const fixable = r.changes.findLast((c) => c.kind !== "deleted");
+  const created = r.changes.filter((c) => c.kind === "created");
   const undoable =
     r.changes.length || r.weightChanges.some((c) => c.kind === "created");
   return {
@@ -754,6 +747,9 @@ export async function resultView(
       [
         ...(undoable ? [btn("Undo", `undo:${r.batchId}`)] : []),
         ...(fixable ? [btn("Fix", `fix:${fixable.meal.id}`)] : []),
+        ...(created.length === 1
+          ? [btn("Again", `again:${created[0].meal.id}`)]
+          : []),
         ...(r.changes.length ? [btn("Today", "today")] : []),
         ...(r.weightChanges.length ? [btn("Weight", "wt:0")] : []),
       ],

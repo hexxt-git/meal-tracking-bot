@@ -14,6 +14,7 @@ import {
   stepAfterKey,
   stepper,
 } from "../../domain/onboarding.ts";
+import { defaultProvider } from "../../config.ts";
 import { isValidKey, looksLikeKey } from "../../services/openrouter.ts";
 import { telegram } from "../../telegram/api.ts";
 import type { Button } from "../../telegram/types.ts";
@@ -25,10 +26,12 @@ import { btn, link, LOG_HINT, REPLY_KEYBOARD, Reply, View } from "../ui.ts";
 
 const KEYS_URL = "https://openrouter.ai/keys";
 
-export const welcomeView = (): View => ({
-  text: `<b>Meal Tracker</b>
+const INTRO = `<b>Meal Tracker</b>
 
-Log what you eat with a photo, a short description or a voice note. Calories and macros are estimated for you and tracked against your daily goals.
+Log what you eat with a photo, a short description or a voice note. Calories and macros are estimated for you and tracked against your daily goals.`;
+
+export const welcomeView = (): View => ({
+  text: `${INTRO}
 
 To start, paste an OpenRouter API key into this chat. It is only used for your own requests, stored encrypted, and your message is deleted right away.
 
@@ -38,6 +41,17 @@ Or use any OpenAI-compatible API of your own instead.`,
     [btn("Use a custom provider", "prov")],
   ],
 });
+
+/** First screen for a user who hasn't set up AI access: straight into the profile when the bot has a default provider. */
+export async function welcome(ctx: Ctx): Promise<View> {
+  if (!defaultProvider()) return welcomeView();
+  ctx.user = await ctx.db.users.update({ onboardingStep: PROFILE_START });
+  return stepView(
+    ctx,
+    undefined,
+    `${INTRO}\n\nFirst, a few questions to set your daily goals.\n\n`,
+  );
+}
 
 export const keyPromptView = (back?: string): View => ({
   text: "Paste your OpenRouter API key into this chat. Your message is deleted right after it's saved.",

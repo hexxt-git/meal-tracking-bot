@@ -357,3 +357,32 @@ Deno.test("note tools save, update, delete and cap notes", async () => {
     "memory is full",
   );
 });
+
+Deno.test(
+  "search_meals finds old meals by title or item, best match first",
+  async () => {
+    const { state, json } = setup();
+    const old = (description: string, name: string, daysAgo: number) =>
+      meal({
+        description,
+        items: [{ ...item(300), name }],
+        eatenAt: new Date(Date.now() - daysAgo * 24 * HOUR),
+        loggedAt: new Date(Date.now() - daysAgo * 24 * HOUR),
+      });
+    state.meals.push(
+      old("Merguez bania sandwich with fries", "Bania bread bun", 30),
+      old("Grilled merguez plate", "Merguez sausages", 2),
+      old("Granola with milk", "Granola", 1),
+    );
+    const found = await json("search_meals", { query: "bania, Merguez!" });
+    assertEquals(
+      found.map((m: { description: string }) => m.description),
+      ["Merguez bania sandwich with fries", "Grilled merguez plate"],
+    );
+    assertEquals(found[0].editable, false);
+    assertEquals(await json("search_meals", { query: "pizza" }), {
+      found: 0,
+    });
+    await assertRejects(() => json("search_meals", { query: " ! " }));
+  },
+);
