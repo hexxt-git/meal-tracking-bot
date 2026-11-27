@@ -199,6 +199,7 @@ export async function logAgain(ctx: Ctx, mealId: string): Promise<Reply> {
   });
   return {
     toast: "Logged again",
+    remember: `User tapped Again: logged another "${meal.description}" (${meal.kcal} kcal) as a separate meal.`,
     send: {
       text: `Logged again: <b>${esc(meal.description)}</b>  ·  ${clock(meal.eatenAt, ctx.user)}\n\n${mealBody(meal)}\n\n${await todayLine(ctx)}`,
       keyboard: [

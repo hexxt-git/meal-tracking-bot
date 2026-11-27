@@ -138,7 +138,12 @@ export async function runCallback(ctx: Ctx, cb: CallbackQuery) {
       reply.view.text,
       reply.view.keyboard,
     );
-  if (reply.send) await ctx.send(reply.send);
+  if (reply.send) {
+    const sent = await ctx.send(reply.send);
+    const id = (sent as { message_id?: number } | null)?.message_id;
+    if (id && reply.remember)
+      await ctx.db.messages.rememberReply(id, reply.remember);
+  }
   await telegram.answerCallback(cb.id, reply.toast).catch(() => {});
   await reply.after?.();
 }

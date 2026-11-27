@@ -11,6 +11,8 @@ export type View = { text: string; keyboard: Keyboard };
 export type Reply = {
   view?: View;
   send?: View;
+  /** Stored as the assistant's message for `send`, so later runs see what the button did. */
+  remember?: string;
   toast?: string;
   after?: () => Promise<unknown>;
 };

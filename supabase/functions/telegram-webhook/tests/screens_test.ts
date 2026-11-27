@@ -367,6 +367,7 @@ Deno.test("Again logs a copy of the meal as eaten now", async () => {
   assertEquals(copy.kcal, 176);
   assert(Date.now() - copy.eatenAt.getTime() < 5_000);
   assertStringIncludes(r.send!.text, "Logged again");
+  assertStringIncludes(r.remember!, "Again");
   assert(
     buttons(r.send!)
       .flat()
